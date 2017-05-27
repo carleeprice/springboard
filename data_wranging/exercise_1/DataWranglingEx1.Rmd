@@ -1,0 +1,77 @@
+---
+title: "Data Wrangling Exercise 1"
+author: "Carlee Price"
+date: "May 27, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Wrangling Exercise 1
+
+0: Load the data into RStudio
+
+```{r}
+refine = read.csv("refine_original.csv")
+```
+
+1: Clean up the brand names
+
+```{r}
+#change all brand names to lowercase
+refine$company <- tolower(refine$company)
+#standardise Philips
+refine$company <- gsub(pattern = "^[ph,f][a-z]*s$", replacement = "philips", refine$company)
+#standardise Akzo
+refine$company <- gsub(pattern = "^ak[a-z, ]*[o,0]$", replacement = "akzo", refine$company)
+#standardise Van Houten
+refine$company <- gsub(pattern = "^van[a-z, ]*", replacement = "van houten", refine$company)
+#standardise Unilever
+refine$company <- gsub(pattern = "^uni[a-z]*r$", replacement = "unilever", refine$company)
+```
+
+2: Separate the product code and number
+
+```{r}
+refine$product_code <- str_match(refine$Product.code...number, "[a-z]")
+refine$product_number <- str_match(refine$Product.code...number, "[0-9]+")
+```
+
+3: Add product categories
+
+```{r}
+refine$product_category <- gsub(pattern = "p", replacement = "Smartphone", refine$product_code)
+refine$product_category <- gsub(pattern = "v", replacement = "TV", refine$product_category)
+refine$product_category <- gsub(pattern = "x", replacement = "Laptop", refine$product_category)
+refine$product_category <- gsub(pattern = "q", replacement = "Tablet", refine$product_category)
+```
+
+4: Add full address for geocoding
+
+```{r}
+refine$full_address <- paste(refine$address, ", ", refine$city, ", ", refine$country)
+```
+
+5: Create dummy variables for company and product category
+
+```{r}
+#binary columns for company
+refine$company_philips <- as.numeric(refine$company == 'philips')
+refine$company_akzo <- as.numeric(refine$company == 'akzo')
+refine$company_van_houten <- as.numeric(refine$company == 'van houten')
+refine$company_unilever <- as.numeric(refine$company == 'unilever')
+#binary columns for product
+refine$product_smartphone <- as.numeric(refine$product_code == 'p')
+refine$product_tv <- as.numeric(refine$product_code == 'v')
+refine$product_laptop <- as.numeric(refine$product_code == 'x')
+refine$product_tablet <- as.numeric(refine$product_code == 'q')
+```
+
+6: Prepare for submission to github
+
+```{r}
+write.csv(refine, file = "refine_clean.csv")
+```
+
