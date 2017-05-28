@@ -1,0 +1,56 @@
+---
+title: "Data Wrangling Exercise 2"
+author: "Carlee Price"
+date: "May 28, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Wrangling Exercise 2
+
+0: Load the data into RStudio
+
+```{r}
+titanic = read.csv("titanic_original.csv")
+```
+
+1: Port of Embarkation
+
+```{r}
+levels(titanic$embarked)[1] <- "S"
+```
+
+2: Age
+
+```{r}
+#calculate the mean age
+x <- mean(titanic$age, na.rm = TRUE)
+#& use it to populate missing values
+titanic$age <- replace(titanic$age, is.na(titanic$age), x)
+```
+
+Other strategies for populating missing values: other aggregate statistics for the group, such as median.  Or one could use a summary statistic for a narrower group within the dataframe.  Average age for women, by example, may be different than for men.  Or passengers who were assigned a cabin versus those who were not.
+
+3: Lifeboat
+
+```{r}
+levels(titanic$boat)[1] <- "None"
+```
+
+4: Cabin
+
+It does *not* make sense here to populate the empty fields with a value.  Missing value means the passenger was cabinless, or travelling in steerage.  
+
+```{r}
+patt <- grepl("[A-Z]", titanic$cabin)
+titanic$has_cabin_number <- as.numeric(patt)
+```
+
+6. Prepare for submission to github
+
+```{r}
+write.csv(titanic, file = "titanic_clean.csv")
+```
