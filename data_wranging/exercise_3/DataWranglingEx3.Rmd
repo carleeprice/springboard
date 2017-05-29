@@ -1,0 +1,86 @@
+---
+title: "Data Wrangling Exercise 3"
+author: "Carlee Price"
+date: "May 29, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Wrangling Exercise 3
+
+0: Load the data in RStudio
+
+```{r}
+#load the information related to test subjects --> this will be added as a column to the dataframe
+subject <- read.table("subject_test.txt", header = FALSE, sep = "\t")
+#load the information related to the parameter that was tested with each trail(row) --> these will be our column names
+features <- read.table("features.txt", header = FALSE, sep = "\t")
+#load the information related to what the test subject was doing at the time (there are five different activities) --> this will be added as a column to the dataframec
+labels <- read.table("y_test.txt", header = FALSE, sep = "\t")
+#load the data, using features to name the columns
+samsung <- read.table("X_test.txt", header = FALSE, sep = "", col.names = features$V1)
+```
+
+0.1: Add Activity, Subject data and Categories
+
+```{r}
+#add the activity(from y_test)
+samsung$activitylabel <- labels$V1
+#add the subject information
+samsung$subject <- subject$V1
+#label all these entries "test" in order to distinguish them from "train" which will be added later
+samsung$set <- c("test")
+```
+
+0.2: Do the same for Training data set
+
+```{r}
+subject2 <- read.table("subject_train.txt", header = FALSE, sep = "\t")
+labels2 <- read.table("y_train.txt", header = FALSE, sep = "\t")
+samsung2 <- read.table("X_train.txt", header = FALSE, sep = "", col.names = features$V1)
+samsung2$activitylabel <- labels2$V1
+samsung2$subject <- subject2$V1
+samsung2$set <- c("train")
+```
+
+1: Merge data sets
+
+```{r}
+samsung3 <- rbind(samsung, samsung2)
+```
+
+2: Mean and Standard Deviation
+
+```{r}
+samsung3$mean <- rowMeans(samsung3[,1:561]) 
+samsung3$stdev <- apply(samsung3[,1:561], 1, sd)
+```
+
+3: Add new variables
+
+```{r}
+names <- read.table("activity_labels.txt", header = FALSE, sep = "", col.names = c("activitylabel", "activityname"))
+samsung4 <- merge(x = samsung3, y = names, by = "activitylabel", all.x = TRUE)
+```
+
+4: Create tidy data set: find averages by subject & activity
+
+```{r}
+bysubject <- aggregate(samsung4[,1:561], by=list(samsung4$subject), FUN=mean)
+#add a field that shows how we've categorized
+bysubject$groupby <- c("subject")
+byactvty <- aggregate(samsung4[,1:561], by=list(samsung4$activitylabel), FUN=mean)
+byactvty$groupby <- c("activity")
+samsungsum <- rbind(byactvty, bysubject)
+```
+
+5: Prepare for submission to github
+
+```{r}
+write.csv(samsungsum, file = "samsung_tidy.csv")
+```
+
+
