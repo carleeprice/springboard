@@ -1,0 +1,140 @@
+---
+title: "Springboard Capstone"
+author: "Carlee Price"
+date: "June 9, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Springboard Capstone Project
+
+Seeking insights from the crunchbase database of venture enterprise founding & funding activity from 2007 - 2014.
+
+### 0. Load and take first look at data
+
+```{r}
+companies = read.csv("companies.csv")
+View(companies)
+summary(companies)
+#list of rows that have missing values
+companies[!complete.cases(companies),]
+# == 22059
+nrow(companies) 
+# == 54294
+colnames(companies)
+```
+
+### 1. Transformation
+
+a) replace the , and - (punctuation) in the funding total rows
+
+```{r}
+companies$funding_total_usd <- as.numeric(gsub("[[:punct:]]", "", companies$funding_total_usd))
+mean(companies$funding_total_usd, na.rm = TRUE)
+```
+
+We also find here our first insight, namely that the average amount of money raised (across companies & occurrences) in this data set is $15.9Mm.  Cool!
+
+b) replace missing values in the status column with "unknown"
+
+```{r}
+levels(companies$status)[1] <- "unknown"
+table(companies$status)
+```
+
+### 2.0 Exploratory Data Analysis "companies"
+
+a) Status column shows us which companies in this set are no longer operating (closed).  How much did these companies raise in comparison to the dataset average?  Just more than half.  Could it be that insufficient funding cripples companies?  There's one theory we can test later. 
+
+```{r}
+closeds <- subset(companies, status == "closed", select = funding_total_usd)
+mean(closeds$funding_total_usd, na.rm = TRUE)
+```
+
+b) Let's also look then at companies that have done many raises.  Having sorted by funding_rounds, we know that 10 amounts in this case to "many".
+
+```{r}
+bigfish <- subset(companies, funding_rounds > 9, select = c(name, funding_rounds, market, funding_total_usd, status, city))
+View(bigfish)
+```
+
+Only one of them "Lecere" is closed (0.99% of the group), and one "CalciMedica" is status unknown (also 0.99% of the group).  This compares to our broader set, where 4.79% of the companies are closed and 11.37% are status unknown.  So there's one piece of evidence that repeated funding improves a company's chances of survival.  No surprise there.
+
+c) It's also possible to look at corporate activity by city.  Here are two of my favourite 'off-brand' cities, and how many companies in each did more than one raise:
+
+```{r}
+vancouver <- subset(companies, city == "Vancouver", select = c(name, funding_rounds, market, funding_total_usd, status, city))
+nrow(subset(vancouver, funding_rounds > 2))
+austin <- subset(companies, city == "Austin", select = c(name, funding_rounds, market, funding_total_usd, status, city))
+nrow(subset(austin, funding_rounds > 2))
+```
+
+Interesting!  Not so much happening in Vancouver compared to Austin.
+
+### 2.1 Exploratory Data Analysis "rounds"
+
+There is another data set available that will yield a closer look at each individual raise.  Load & clean this one in a similar fashion to our first. 
+
+```{r}
+rounds = read.csv("rounds.csv")
+View(rounds)
+summary(rounds)
+rounds$raised_amount_usd <- as.numeric(gsub("[[:punct:]]", "", rounds$raised_amount_usd))
+```
+
+Here we can look at how to example companies, one from each of our beloved cities, proceeded up the capital ladder (raises of increasing size and complexity).
+
+```{r}
+hootsuite <- subset(rounds, company_name == "Hootsuite", select = c(funding_round_type, funding_round_code, funded_at, raised_amount_usd))
+hootsuite[with(hootsuite, order(-raised_amount_usd)), ]
+spiceworks <- subset(rounds, company_name == "Spiceworks", select = c(funding_round_type, funding_round_code, funded_at, raised_amount_usd))
+spiceworks[with(storediq, order(-raised_amount_usd)), ]
+```
+
+Both have raised similar amounts and have done so in generally increasing buckets from venture capital.
+
+Sticking with the "rounds" data, we're going to look just at companies that have proceeded to "D" round.  These are going to be among our most successful examples, raising the greatest amounts of capital.
+
+```{r}
+dround <- subset(rounds, funding_round_code == "D", select = c(company_name, company_city, funding_round_code, funded_year, raised_amount_usd))
+nrow(dround)
+```
+
+There are 1462 rows in this subset. We can also start to do visualizations, looking at the # of companies securing D-round financing, and the size of this financing, by year. Clearly this has become more common in recent years.  Same is true of C-rounds, although the increase is less pronounced.
+
+```{r, echo = FALSE}
+plot(dround$funded_year, dround$raised_amount_usd)
+cround <- subset(rounds, funding_round_code == "C", select = c(company_name, company_city, funding_round_code, funded_year, raised_amount_usd))
+plot(cround$funded_year, cround$raised_amount_usd)
+```
+
+We suspect that companies which raise more money, and who proceed further along the capital ladder, will see greater success.  We have also seen that this has been happening more, recently.  Perhaps then we can find the most successful companies among those in our set that are oldest.
+
+The "founded_at" field can be cast as a number, and numbers of 150 or less indicate founding dates prior to 1980.  Subsetting the data by this field will give us the most long-lived companies in the data set.  It also returns a number of blank fields, so a second subset will strip these out.
+
+```{r}
+oldies <- subset(companies, as.numeric(founded_at) < 150, select = c(name, status, city, founded_at, first_funding_at, funding_rounds))
+oldies <- subset(oldies, as.numeric(founded_at) > 50)
+nrow(oldies)
+```
+
+There are 387 rows in our set of "old" companies. In many of these cases, the company itself was founded long ago, but it only started raising money recently.  So we'll change tack slightly and look at the companies that have been active fundraisers for the longest stretch of time.  Fields "first_funding_at" and "last_funding_at" will help us do this.  First we create a new field (last_funding - first funding).
+
+```{r}
+companies$time_in_funding <- as.numeric(companies$last_funding_at) - as.numeric(companies$first_funding_at)
+```
+
+Sorting this row by longest time_in_funding gives us two examples of companies (Answers Corporation and DocuSign) that did many different financings, and did these over the course of many years.    
+
+The narrative here is that companies that raise often and in increasing amounts are most successful (analysis of correlation-causation will come later).  Interstingly, though, we're not seeing seed rounds for any of the companies we've singled out as having trod a successful path.  Let's take a closer look.
+
+First we construct a subset of companies with "angel" and "seed" round financings.
+
+```{r}
+seedstage1 <- subset(rounds, funding_round_type == "angel")
+seedstage2 <- subset(rounds, funding_round_type == "seed")
+seedstage <- rbind(seedstage1, seedstage2)
+```
