@@ -1,0 +1,235 @@
+---
+title: "springboard_capstone_2"
+author: "Carlee Price"
+date: "June 17, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A STUDY ON THE ANGEL INVESTING LANDSCAPE AND OUTCOMES FOR INVESTORS
+
+WHAT WE HAVE:
+
+A Crunchbase data set that reports investments in seed-stage companies.  *Need to find out what the criteria were for inclusion; hyperlinks included with the dataset are dead*.  This data is a sample, reflecting some portion of the total amount of activity in this space.  In order to draw broad conclusions about the industry, we'll need to make assumptions about how much of the population of transactions has been captured.
+
+WHAT WE WANT TO KNOW:
+
+PART I: UNDERSTANDING THE CONTEXT
+
+1. Use additional data sources (# of deals reported by formal angel groups, Kaufmann Foundation reports on entrepreneurial activity, BLS data - ?) to frame out this data within the context of "The Industry".  Are there successful angel exits that never hit this particular radar?  What do we know about those?
+
+2. Define the Angel space --> for example if I lend money to my nephew to start a bakery, does that count?  What about going in with some friends to start a bar/restaurant?  Doctors are anectdottaly prone to underwrite a host of medical enterprises run by their friends. *This exploration may in fact be a good portion of the work*
+
+PART II: WHAT OUTCOMES LOOK LIKE FOR PARTICIPANTS IN THIS SPACE
+
+1. Each company that appears in this list will either continue to raise capital through time, or will fade away.  We want to graphically describe this process.
+
+2. A Sankey diagram might work nicely.
+
+  a) X axis is time.  Y axis is funding rounds (Seed --> Series C+).  Width of bar is *number of companies*. All our companies will be in the count initially, at each junction (moving left to right), the company will either raise more $ (up on the graph), shut down (down to zero), or exit (straight to RHS of plot). 
+
+  b) there ought to be a way to do this using $ raised rather than # of companies, stay tuned.
+
+3. We could also create angel porfolios, by collecting randomly 12 - 15 companies over seven years (this is the prescribed methodology for reducing risk and maximising returns as an individual angel) and following them through the course of their evolution.  
+
+4. We'll start with seven years of data (2007 - 2014) but note that this window can easily be adjusted backward (earlier), less easily *check with crunchbase on this* forward.  Seven years is genearlly accepted as the standard horizon for investments in this space.
+
+### Challenges with this data:
+
+1. Studying this space is tricky: there is no central repository that tracks angel investment data as there is for example with Real Estate or stocks.  One of the important things we'll need to do when drawing conclusions is make informed assumptions (& properly disclose them) about what portion of the whole is represented here.  
+
+2. The data set ends in 2014.  While we don't necessarily need to enter new companies in the database past this point (since we want to give them fair opportunity to achieve an exit) we *will* need to follow the companies we've collected in our cohorts into subsequent periods, to follow their funding outcomes.
+
+3. Outcomes 
+
+## PART II: WORKING WITH THE CRUNCHBASE DATA
+
+LOAD & TRANSFORM 
+
+```{r}
+companies = read.csv("companies.csv")
+#keep only the companies that are US-based
+companies <- subset(companies, country_code == "USA")
+#we also want to keep only the companies with first_funded_at dates of 2007 or later
+#first cast this column as a date
+companies$first_funding_at <- format(as.Date(companies$first_funding_at), "%Y/%m/%d")
+companies <- subset(companies, first_funding_at >= '2007/01/01')
+View(companies)
+summary(companies)
+#list of rows that have missing values
+companies[!complete.cases(companies),]
+# == 28793
+nrow(companies) 
+# == 54294
+colnames(companies)
+```
+
+Transform the funding column into useable form (by stripping punctuation, converting to integer) and changing blanks in status column to read "unknown".
+
+```{r}
+companies$funding_total_usd <- as.numeric(gsub("[[:punct:]]", "", companies$funding_total_usd))
+#not sure we need this next one
+#mean(companies$funding_total_usd, na.rm = TRUE)
+levels(companies$status)[1] <- "unknown"
+table(companies$status)
+```
+
+Load information on funding rounds, filter for US companies only, correct formatting of raised_amount column.
+
+```{r}
+rounds = read.csv("rounds.csv")
+rounds <- subset(rounds, company_country_code == "USA")
+View(rounds)
+summary(rounds)
+rounds$raised_amount_usd <- as.numeric(gsub("[[:punct:]]", "", rounds$raised_amount_usd))
+```
+
+To see where we're going, let's have a quick look at some tables
+
+```{r}
+table(rounds$funding_round_type)
+table(rounds$funding_round_code)
+```
+
+As expected, the number of companies at each ascending rung on the capital ladder declines.  We need now to add data on exits as well.
+
+
+```{r}
+acquisitions = read.csv("acquisitions.csv")
+acquisitions <- subset(acquisitions, company_country_code == "USA")
+acquisitions$price_amount <- as.numeric(gsub("[[:punct:]]", "", acquisitions$price_amount))
+View(acquisitions)
+```
+
+Starting with our companies table (which has been subset to include only US companies first funded in 2007 or later), let's see what our funnel might look like.  By number of funding rounds (we'll look later to see if they're getting bigger & more impactful in size):
+
+```{r}
+table(companies$funding_rounds)
+table(companies$status)
+```
+
+### What we're interested in is successful outcomes for angels, which come in only one flavour: exit.  
+
+And failures, which come in two flavours: officially closed, and some proportion of the "unknown"s.
+
+Exits are generally well tracked: the acquirer is typically higher-profile and will issue a press release.  These transactions are clearly labeled in our data set ("acquireds") and the price column is generally well-populated.
+
+```{r}
+acquireds <- subset(companies, status = "acquired")
+View(acquireds)
+```
+We have "acquired"s in our company table.  At what stage, though, were they acquired?  Is this an interesting question?
+
+Before we start to join these tables together, let's size them down a bit.
+
+```{r}
+acquireds2 <- subset(acquireds, select = c(name, funding_total_usd, status, state_code, region, city, funding_rounds, founded_year, first_funding_at))
+acquisitions2 <- subset(acquisitions, select = c(company_name, company_state_code, company_region, company_city, acquirer_name, acquired_at, price_amount, price_currency_code))
+#since we'll be joining on name, we need to make sure column names match
+colnames(acquisitions2)[1] <- "name"
+```
+
+Then join them 
+
+```{r}
+joinedacq <- merge(x = acquireds2, y = acquisitions2, by = "name", all.x = TRUE)
+View(joinedacq)
+```
+
+There are duplicate rows in this merged dataframe.  Two examples:
+
+```{r}
+subset(joinedacq, name == "Catch.com")
+#this one can be eliminated with:
+joinedacq2 <- unique(joinedacq)
+#but this one is not. note the small, confusing difference (acquirer_name)
+subset(joinedacq2, name == "Forrst")
+#this data may be of poor quality.  
+```
+
+Setting aside for a moment the fact that this data is junky, let's look at returns on exit. Quick look:
+
+```{r}
+mean(joinedacq2$price_amount, na.rm = TRUE)/mean(joinedacq2$funding_total_usd, na.rm = TRUE)
+```
+
+More detailed look, including only those transations for which the price is known:
+
+```{r}
+knownprice <- subset(joinedacq2, price_amount > 0)
+mean(knownprice$price_amount, na.rm = TRUE)/mean(knownprice$funding_total_usd, na.rm = TRUE)
+```
+
+The funding totals for companies whose price at acquisition was disclosed is 1.68X the amount of those companies for which acquisition price remained undisclosed.
+
+```{r}
+mean(knownprice$funding_total_usd, na.rm = TRUE)/mean(joinedacq2$funding_total_usd, na.rm = TRUE)
+```
+
+There's a crazy outlier in this dataset.
+
+```{r}
+knownprice$return_on_funding <- knownprice$price_amount/knownprice$funding_total_usd
+plot(knownprice$return_on_funding, log = "y")
+subset(knownprice, return_on_funding > 5000)
+subset(joinedacq, name == "Aptalis Pharma")
+```
+
+Here's another fun plot:
+
+```{r}
+plot(knownprice$price_amount, knownprice$funding_total_usd, log = "xy")
+```
+
+
+Here we see another fun outlier.
+
+```{r}
+subset(knownprice, price_amount < 1000)
+subset(joinedacq, name == "Riot Games")
+```
+
+The presence of this type of data is actually good news for us.  Many of the companies which at the end of our study horizon are of status "unknown" have effectively ceased operations (negative outcome) but are not officially "closed", so some mystery remains.  Sometimes, these "zombie companies" will be acquired for some small amount (as we see here) in order that the investors can take a tax loss.  This "resolves" the staus of the company, but is not an acqusition that can be declared a victory for investors.  BUT we now that Riot Games was actually a wild success, having been sold for $231Mm in 2011.  *Why is it recorded as a sale worth 400 here?*
+
+#### Some work on PART II:
+
+Let's take one year in one region and see how the data in this set compares to what was reported elsewhere.
+
+```{r}
+#this could potentially be condensed into a single line
+austin <- subset(companies, region == "Austin")
+austin2014 <- subset(austin, first_funding_at >= "2014/01/01" & first_funding_at <= "2014/12/31")
+summary(austin2014)
+```
+
+Here's another great example of the problematic nature of this data set.  Two of these companies which are listed as status "unknown" are in fact easily known.  RiverRock Energy is clearly still in business (see website), although its operations have changed.  I'm not sure what happened to investors here but the company is clearly doing well.  Quantum Materials Corp is clearly problematic, this is a company that is listed on a public exchange, and clearly not founded in San Marcos in 2008.  *Is it a subsidiary?  What is the funding event that happened on 2014-02-06?*
+
+The point here is to get a sense of how this data compares to activity reported in the Austin startup community from other sources.  Our data shows 101 companies in the Austin area that recieved "first funding" in 2014:
+
+```{r}
+nrow(austin2014)
+```
+
+CTAN, the biggest (but not the only) angel group in Austin, repoted 33 successful fundings in 2014.  So our most reliable source of verification represents only 1/3 of our data set.  Food for thought.
+
+We may still be able to find use in this data set.  Let's look instead at Austin activity in 2007.
+
+```{r}
+austin2007 <- subset(austin, first_funding_at >= "2007/01/01" & first_funding_at <= "2007/12/31")
+summary(austin2007)
+```
+
+This is interesting.  We have 31 companies funded in Austin in 2007, of which 9 were acquired, 7 closed, and 15 still operating.  This jibes with what we've been led to believe is true about the industry.
+
+Can we draw any conclusions about returns from this subset?  NO BECAUSE WE ONLY HAVE PRICE INFORMATION FOR ONE SINGLE COMPANY OF THE NINE ACQUIRED daaaammmmmmmit!!
+
+Let's append to this dataframe the information from our acquisitions table. 
+
+```{r}
+colnames(austin2007)[(names(austin2007) == "name")] <- "company_name"
+austin07full <- merge(x = austin2007, y = acquisitions, by = "company_name", all.x = TRUE)
+View(austin07full)
+```
