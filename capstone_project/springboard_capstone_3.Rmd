@@ -2,7 +2,7 @@
 title: "Springboard Capstone 3"
 author: "Carlee Price"
 date: "July 8, 2017"
-output: pdf_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 WHAT WE HAVE:
 
-A Crunchbase data set that reports investments in seed-stage companies. This data is a sample, reflecting some portion of the total amount of activity in this space.  It was published in 2014 and reflected activity in the space up to that point.  We're going to select from the global, long-horizon data set those companies that received first funding *in the US after 2007*. 
+A Crunchbase data set that reports investments in seed-stage companies. This data is a sample, reflecting some portion of the total amount of activity in this space.  It was published in 2014 and reflected activity in the space up to that point.  We're going to select from the global, long-horizon data set those companies that received first funding in the US after 2007. 
 
 The goal here is to characterise for potential investors in this space, what the range of potential outcomes (returns on their invested capital) might be, and what proper portfolio construction looks like and means for those same returns.
 
@@ -179,14 +179,14 @@ grp <- c(0, 1, 5, 15, 35, 20000)
 #set factors & assign names
 test$rfact = cut(test$return, breaks = grp,labels=c('Subpar','Low', 'Medium','High', 'Bananas'), ordered = TRUE)
 #create a boxplot
-plot(x = test$rfact, y = test$funding_total_usd, log = 'y', ylab = "funds raised", xlab = "quality of return")
-ggplot(test, aes(x=rfact, y=funding_total_usd)) + geom_boxplot()
+#plot(x = test$rfact, y = test$funding_total_usd, log = 'y', ylab = "funds raised", xlab = "quality of return")
+ggplot(test, aes(x=rfact, y=funding_total_usd)) + geom_boxplot() + scale_y_continuous(trans = "log")
 ```
 
 ```{r}
 ggplot(test, aes(rfact, funding_total_usd)) + geom_boxplot(colour = "#3366FF") +
   geom_jitter(width = 0.1, colour = "blue") +
-  scale_y_continuous(trans = "log2")
+  scale_y_continuous(trans = "log")
 ```
 
 Here again we can see that companies are most likely to appear generate "bananas" returns if they've raised less money.  Likewise, those companies that have raised the most are in the lower-tier returns buckets.  Interesting!
