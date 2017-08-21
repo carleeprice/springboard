@@ -1,0 +1,379 @@
+---
+title: "Springboard Capstone 3"
+author: "Carlee Price"
+date: "July 8, 2017"
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A STUDY ON THE ANGEL INVESTING LANDSCAPE AND OUTCOMES FOR INVESTORS
+
+WHAT WE HAVE:
+
+A Crunchbase data set that reports investments in seed-stage companies. This data is a sample, reflecting some portion of the total amount of activity in this space.  It was published in 2014 and reflected activity in the space up to that point.  We're going to select from the global, long-horizon data set those companies that received first funding in the US after 2007. 
+
+The goal here is to characterise for potential investors in this space, what the range of potential outcomes (returns on their invested capital) might be, and what proper portfolio construction looks like and means for those same returns.
+
+## PART I: WORKING WITH THE CRUNCHBASE DATA
+
+#### LOAD & TRANSFORM 
+
+```{r}
+#read in the file that includes all the company information for this database
+allcompanies = read.csv("companies.csv")
+```
+
+```{r}
+#keep only the companies that are US-based
+companies <- subset(allcompanies, country_code == "USA")
+#we also want to keep only the companies with first_funded_at dates of 2007 or later
+#first cast this column as a date
+companies$first_funding_at <- format(as.Date(companies$first_funding_at), "%Y/%m/%d")
+#then screen for chosen date
+companies <- subset(companies, first_funding_at >= '2007/01/01')
+nrow(companies)
+#check for completeness in the resulting set; list of rows that have missing values
+nrow(companies[!complete.cases(companies),])
+#what information has been captured for these companies?
+colnames(companies)
+```
+
+After subsetting the data, we have 25,837 rows of which 4,688 are incomplete.  Some of this missing data won't bother us, but in the case of funding_total_usd, it is important.  Our study focuses on companies that raise money from outsiders.  Our conclusions will largely depend on what happens to the dollars these companies raise.  If we don't know in a case (row) how may dollars are involved, it becomes difficult to draw conclusions.  Below, we will remove any companies for which the funding total shows N/A. 
+
+
+#### DATA EXPLORATION
+
+WIN/LOSS RATIO
+
+Starting with the most simple outcome evaluation, let's consider how frequently companies are closed (return falls to zero, all money lost) versus acquired (return is cemented at some non-zero amount).  What is the ratio of each within the total population of companies?
+
+```{r}
+#transform funding column by stripping punctuation & converting to integer
+companies$funding_total_usd <- as.numeric(gsub("[[:punct:]]", "", companies$funding_total_usd))
+#strip out companies funded with too small a pool to be relevant for our audience
+companies <- subset(companies, funding_total_usd > 100000)
+nrow(companies) 
+#replace missing status fields  
+levels(companies$status)[1] <- "unknown"
+table(companies$status)
+#find the ratios
+table(companies$status)[2]/nrow(companies)
+table(companies$status)[3]/nrow(companies)
+```
+
+Counting exits (acquired) as a win (8.2%) and closeds as a loss (4.4%) looks encouraging; the ratio is > 1.  Will the numbers be different if we look at just one vintage of companies?  Let's look just at companies that were funded in 2007, not after.  There are 1276 rows in this subset.
+
+
+```{r}
+companies07 <- subset(companies, first_funding_at <= '2007/12/31')
+nrow(companies07)
+table(companies07$status)
+table(companies07$status)[2]/nrow(companies07)
+table(companies07$status)[3]/nrow(companies07)
+```
+
+Here we see the wins (26.0%) and losses (12.6%) are much higher; an even better ratio.  It seems that spending more time in the market leads to more resolutions (closure or acquisition).  Remember this data was captured in 2014. 
+
+DOLLAR-ON-DOLLAR RETURNS
+
+Let's get more granular, and look not just at the outcome but at the degree of success.  Closure of a business can only result in 100% loss but an exit can clearly generate > 100% returns.  We're working towards a picture of total portfolio returns.
+
+Add two new data sets from the same source: funding rounds (amounts raised) and acquisitions (exit values).  Both will need to be tidied in a similar fashion to our companies table.   
+
+```{r}
+allrounds = read.csv("rounds.csv")
+rounds <- subset(allrounds, company_country_code == "USA")
+rounds$raised_amount_usd <- as.numeric(gsub("[[:punct:]]", "", rounds$raised_amount_usd))
+allacquisitions = read.csv("acquisitions.csv")
+acquisitions <- subset(allacquisitions, company_country_code == "USA")
+acquisitions$price_amount <- as.numeric(gsub("[[:punct:]]", "", acquisitions$price_amount))
+```
+
+In the process of this exploration, some data-quality issues emerge.  We address two of these here.  
+
+First, in acquisitions set: Riot Games was acquired by Tenecet for 400Mm, not the USD 4,000 noted. 
+
+```{r}
+#calling this by index rather than name is dangerous - consider changing
+acquisitions$price_amount[5344] <- 400000000
+```
+
+Second, in companies set: Aptalis Pharma is listed as having raised a single round (173k seed capital) and then proceeding to exit for $2.9Bn.  That would create an impressive return indeed for funders.  The reality is that the company actually was spun out from the merger of two established pharmaceutical giants.  At the date of formation had seven branded products in market, and a robust development pipeline.  There was far more than USD 173k in value within the company.  Because this is incorrect and because the actual nature of the enterprise disqualifies it from this (startup) data set, it comes out as well. 
+
+We want to add this information to our set of companies, created above, for which funding data exists. 
+
+We're not able to screen these new tables for "first funding" date, as we did with our companies table.  So instead we'll use a left join, which allows us to start with the screened companies table and add information from the new data sets only where it matches. 
+
+```{r}
+#select just the columns from companies that we want to see in the new dataset
+companies2 <- subset(companies, select = c(name, funding_total_usd, status, state_code, region, city, funding_rounds, founded_year, first_funding_at))
+#remove Aptalis Pharma
+companies2 <- companies2[!companies2$name == "Aptalis Pharma",]
+acquisitions2 <- subset(acquisitions, select = c(company_name, company_city, acquirer_name, acquired_at, price_amount))
+#we can't simply join on name, since there are a number of unique companies that share a name.  
+#create a new column namecity that includes both the name of the company & the city of its founding
+companies2$namecity <- paste(companies2$name, companies2$city)
+acquisitions2$namecity <- paste(acquisitions2$company_name, acquisitions2$company_city)
+#then join them
+joinedset <- merge(x = companies2, y = acquisitions2, by = "namecity", all.x = TRUE)
+```
+
+There are duplicate rows in this merged dataframe.  If we screen using unique, we remove 12 rows that are perfectly identical. There are also companies in here which have been acquired twice (see: Forrst).  Stakeholders may in this case be getting paid twice, but not necessarily.  Further, the amount of the gain in the second case would be the differential between that and the first bid, rather than the entire amount.  This gets tricky, but can be properly addressed only where both prices (acquisition 1 and acquisition 2) are disclosed.
+
+Uniqueness for our case will include name + first funding + acquired date.  Eliminates 18 rows. 
+
+```{r}
+library(dplyr)
+nrow(joinedset)
+joinedset <- distinct(joinedset, name, first_funding_at, acquired_at, .keep_all = TRUE)
+nrow(joinedset)
+```
+
+Our rounds list includes all the funding events for all the companies in this set.  It will tell us which of the companies took seed capital (which we need) but a lot of additional information as well.  This is not the best way to do this. 
+
+```{r}
+nrow(rounds)
+#select just the columns we want to see, and just the rows meeting our "seed or angel funding" criteria
+rounds2 <- subset(rounds, rounds$funding_round_type %in% c("seed", "angel"), drop = TRUE, select = c(company_name, company_city, funding_round_type, funded_at, raised_amount_usd))
+#create namecity field for proper joining
+rounds2$namecity <- paste(rounds2$company_name, rounds2$company_city)
+#eliminate duplicates
+rounds2 <- distinct(rounds2, company_name, company_city, .keep_all = TRUE)
+#join together
+joinedset2 <- merge(x = joinedset, y = rounds2, by = "namecity", all.x = TRUE)
+joinedset2 <- subset(joinedset2, joinedset2$funding_round_type %in% c("seed", "angel"), drop = TRUE)
+```
+
+As a result of the join, we have several repeating columns.  Let's take them out.
+
+```{r}
+#none of these work as a means to dropping extraneous rows from the dataframe
+#drops <- c("company_name.x", "company_state_code", "company_region", "company_city.x", "price_currency_code", "company_name.y", #company_city.y")
+#for(i in drops){
+#  joinedset2$i == NULL
+#}
+#joinedset2[ , !(names(joinedset2) %in% drops)]
+#joinedset2 <- subset(joinedset2, select = -c("company_name.x", "company_state_code", "company_region", "company_city.x", #"price_currency_code", "company_name.y", "company_city.y"))
+```
+
+And we have to filter out for repeats again.  We'll also use this opportunity to correct several other faulty datapoints.  We're left with 6647 companies in the study set. 
+
+```{r}
+nrow(joinedset2)
+joinedset2 <- distinct(joinedset2, name, first_funding_at, acquired_at, .keep_all = TRUE)
+nrow(joinedset2)
+joinedset2$acquired_at[joinedset2$name == "DataPad"] <- "2014-09-30"
+joinedset2$acquired_at[joinedset2$name == "Modern Feed"] <- "2009-06-01"
+joinedset2$acquired_at[joinedset2$name == "Buccaneer"] <- "2010-08-09"
+joinedset2$price_amount[joinedset2$name == "Buccaneer"] <- 65000000
+joinedset2 <- joinedset2[!(joinedset2$name == "Roost" & joinedset2$founded_year == 2013),]
+```
+
+Now we're ready to look at returns.  Angels want to see exits, as that's the only way they're getting the money back, and the source of their returns.  Our "status" field tells us which companies have been acquired and from that we got % exits (successes). We also want dollar-on-dollar % return, which requires acquisition price information (numerator) in addition to total funding information (denominator). Here we see another opportunity to remove corrupt data, specifically OhmData which is purported to have been funded for 185k and acquired for 3Mm just a month later. 
+
+We've also made the judgement to remove WhatsApp from the group. This transaction was an outlier to such an extent that it may unfairly impact our analysis & conclusions. 
+
+```{r}
+nrow(joinedset2)
+#subset for where acquisition price information is disclosed
+test <- subset(joinedset2, price_amount > 1, funding_total_usd >1)
+test <- test[!test$name == "OhmData",] 
+test <- test[!test$name == "WhatsApp",]
+nrow(test)
+#create a new column that shows total $ returned to investors against total $ raised
+test$return <- test$price_amount/test$funding_total_usd
+#use sum here instead of averaging the test$return column as it's more reflective
+sum(test$price_amount)/sum(test$funding_total_usd, na.rm = TRUE)
+```
+
+Only 104 of the 6647 companies described as "acquired" in our joined set include pricing information. Still a reasonable sample size, and the numbers are encouraging (23.9X return on total amount raised) but let's look closer.  First, to annualize results. 
+
+Let's create a field that shows annualized returns by company, and then plot these against time to see if there are any interesting trends.
+
+```{r}
+#first convert acquired_at to proper date format
+test$acquired_at <- format(as.Date(test$acquired_at), "%Y/%m/%d")
+#then to calculate how many days a company spent between funding and acquisition
+test$age_at_acquisition <- (as.Date(test$acquired_at) - as.Date(test$first_funding_at))
+#whiche we then use to calculate annualized returns
+test$annual_return <- (test$return ^ (365.25/as.integer(test$age_at_acquisition)) - 1)
+plot(test$founded_year, test$annual_return, log = "y", ylab = "Annualized Returns", xlab = "Date of First Funding")
+```
+
+```{r}
+mean(test$annual_return)
+(sum(test$price_amount)/sum(test$funding_total_usd))^(365.25/(mean(as.integer(test$age_at_acquisition))))-1
+```
+
+```{r}
+library(ggplot2)
+#ggplot(joinedset2, aes(x=status, y=funding_total_usd)) + geom_boxplot() + scale_y_continuous(trans = "log")
+ggplot(joinedset2, aes(status, funding_total_usd)) + geom_boxplot(colour = "#3366FF") +
+  geom_jitter(width = 0.1, colour = "blue") +
+  scale_y_continuous(trans = "log")
+```
+
+We know what returns on our fully-documented transactions are, but in order to get a full picture of the space, we need to take into account the other transactions as well.  For this we'll go back to our joinedset2 and work to understand the metrics here.  We can step closer to the truth on returns by keeping sum of disclosed prices in the numerator, but changing the denominator to all the funds put to work during this same period.
+
+```{r}
+sum(test$price_amount)/sum(test$funding_total_usd)
+sum(test$price_amount)/sum(joinedset2$funding_total_usd)
+```
+
+This gives us a sense of the magnitude of effect including our incomplete cases in the analysis will have.
+
+```{r}
+#add a category for companies that are acquired at disclosed prices
+joinedset2$status <- factor(joinedset2$status, levels = c(levels(joinedset2$status), "priced acquired"))
+#i'd like to reassign a subset of the group to the new "priced acquired" level, but this does not work
+#joinedset2$status <- ifelse((joinedset2$status == "acquired" & is.na(joinedset2$price_amount)), joinedset2$status == "priced #acquired", joinedset2$status == joinedset2$status)
+```
+
+It also may be useful to add an age column for the remaining companies also.  When moving from age to return, however, we notice that the $ returned on disclosed acquisitions is below the total amount raised by this group.  So returns are going to be negative.  We must work to fill in some of these missing values.
+
+```{r}
+end <- as.Date("12/31/14", "%m/%d/%y")
+joinedset2$age <- ifelse(is.na(joinedset2$acquired_at), (end - as.Date(joinedset2$first_funding_at)),
+                         (as.Date(joinedset2$acquired_at) - as.Date(joinedset2$first_funding_at)))
+(sum(test$price_amount)/sum(joinedset2$funding_total_usd))^(365.35/(mean(joinedset2$age, na.rm = TRUE)))-1
+joinedset2 %>%  group_by(status) %>% 
+          summarise(raised = sum(funding_total_usd), rounds = mean(funding_rounds), age = mean(age))
+```
+
+#### INFERENCES AROUND MISSING DATA
+
+STATUS ACQUIRED, PRICE MISING
+
+First let's subset the companies acquired without disclosed price
+
+```{r}
+table(joinedset2$status)
+guess <- subset(joinedset2, joinedset2$status == "acquired" & is.na(joinedset2$price_amount), drop = TRUE)
+nrow(guess)
+```
+
+Let's have a crack at populating the "price_amount" column for these companies.  We know that on average these companies raised 42% of what the "priced acquired" group did.
+
+```{r}
+mean(test$funding_total_usd)
+mean(guess$funding_total_usd)/mean(test$funding_total_usd)
+
+```
+
+So we can fairly assume they would realise 40% the value on exit.  Let's take a vector of all the disclosed prices from the test set and sample from that to assign guessprices to the companies in our guess set. Here's the math:
+
+```{r}
+log(test$annual_return[1] + 1) * (test$age_at_acquisition[1]/365.25)
+#is equal to
+log(test$price_amount[1]/test$funding_total_usd[1])
+#and as luck would have it,
+exp((log(test$annual_return[1] + 1)) * (as.integer(test$age_at_acquisition[1])/365.25))
+#is equal to
+test$price_amount[1]/test$funding_total_usd[1]
+#which further means that
+test$funding_total_usd[1] * (exp((log(test$annual_return[1] + 1)) * (as.integer(test$age_at_acquisition[1])/365.25)))
+#is equal to
+test$price_amount[1]
+```
+
+
+```{r}
+guessreturn <- test$annual_return
+guess$annual_return <- sample(guessreturn, size = nrow(guess), replace = TRUE)
+guess$price_amount <- guess$funding_total_usd * (exp((log(guess$annual_return + 1)) * (as.integer(guess$age)/365.25)))
+```
+
+Next we're going to combine these all back together and draw some conclusions about portfolio construction.
+
+```{r}
+operators <- subset(joinedset2, status == "operating")
+
+```
+
+STATUS OPERATING, POTENTIALLY ACQUIRABLE
+
+
+
+#### IDENTIFYING DRIVERS OF SUCCESS/FAILURE
+
+DOES RAISING MORE MONEY LEAD TO BETTER RETURNS?
+
+We can also use our returns column to draw some conclusions about returns relative to amounts raised. The companies we hear about in the press tend to be frequently in front of investors; they're cash-consumptive and generally percieved as fancy.  But do these companies outperform their less capital-intensive peers?  A regression analysis should give a clue.
+
+```{r}
+library(ggplot2)
+ggplot(test, aes(funding_total_usd, return)) +
+ geom_point(aes(color = funding_rounds)) + 
+ scale_color_gradient(low = "green", high = "red") +
+ geom_smooth(method ="lm") +
+ scale_y_continuous(trans = "log2") +
+  scale_x_continuous(trans = "log2")
+```
+
+The slope here is negative, which tells us that companies which raise more tend to return less dollar-for-dollar.  This may suprise some.  You'll also notice that companies that raise a large number of rounds, struggle to generate returns
+
+Next we factor these companies by returns, and look at the funding characteristics (amounts raised) by bucket.
+
+```{r}
+#set breaks for each funding bucket, levels came about through trial & error
+grp <- c(0, 1, 5, 15, 35, 20000)
+#set factors & assign names
+test$rfact = cut(test$return, breaks = grp,labels=c('Subpar','Low', 'Medium','High', 'Bananas'), ordered = TRUE)
+#create a boxplot
+#plot(x = test$rfact, y = test$funding_total_usd, log = 'y', ylab = "funds raised", xlab = "quality of return")
+ggplot(test, aes(x=rfact, y=funding_total_usd)) + geom_boxplot() + scale_y_continuous(trans = "log")
+```
+
+```{r}
+ggplot(test, aes(rfact, funding_total_usd)) + geom_boxplot(colour = "#3366FF") +
+  geom_jitter(width = 0.1, colour = "blue") +
+  scale_y_continuous(trans = "log")
+```
+
+Here again we can see that companies are most likely to appear generate "bananas" returns if they've raised less money.  Likewise, those companies that have raised the most are in the lower-tier returns buckets.  Interesting!
+
+Is it a statistically significant relationship?  Let's get the z score.
+
+```{r}
+#there must be an easier way to do this
+ftusd <- sd(test$funding_total_usd, na.rm = TRUE)
+ftumn <- mean(test$funding_total_usd, na.rm = TRUE)
+a <- subset(test, test$rfact == "Bananas")
+amean <- mean(a$funding_total_usd)
+(amean - ftumn)/(ftusd/(sqrt(nrow(a))))
+```
+
+```{r}
+b <- subset(test, test$rfact == "Subpar")
+bmean <- mean(b$funding_total_usd)
+(bmean - ftumn)/(ftusd/(sqrt(nrow(b))))
+```
+
+Returns in the Subpar category are much more of an outlier than those in the Bananas category. Raising large amounts of money is very coincident with lower returns.
+
+We can get into SQL-like queries by using the dplyr pipe operator.  Let's summarise some statistics by factor.
+
+```{r}
+test %>%  group_by(rfact) %>% 
+          summarise(raised = mean(funding_total_usd), rounds = mean(funding_rounds), return = mean(return))
+```
+
+We can also have a look at how well these characteristics interact with each other.  
+
+Let's start by building a predictor model from the set of medium returns (5 - 15X):
+
+```{r}
+medset <- subset(test, rfact == "Medium")
+fit = lm(return ~ funding_total_usd, medset) # Run a regression analysis
+par(mfrow=c(2,2)) # Change the panel layout to 2 x 2
+plot(fit)
+par(mfrow=c(1,1))
+```
+
+USING K-MEANS CLUSTERING TO DO STUFF
