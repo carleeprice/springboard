@@ -1,0 +1,774 @@
+---
+title: "Springboard Capstone 3: A Study on Angel Investing"
+author: "Carlee Price"
+date: "September 27, 2017"
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A STUDY ON THE ANGEL INVESTING LANDSCAPE AND OUTCOMES FOR INVESTORS
+
+## BACKGROUND & OBJECTIVES
+
+Angel Investing is a form of equity investing.  It is similar to the stock market in the sense that it allows individuals to own a piece of a company in which they have no operating role and to benefit financially from that company's success.  Angel Investing is different from stock market investing in important ways, most notably: liquidity (ability to turn the investment back into cash at will), visibility (how much is the investment worth at a given point in time) and history (how much do we know about the behavior of these type of investments over time).  
+
+We'll be using some industry vernacular in the report:
+
+Equity: the type of ownership interest an investor in this space holds, appreciates most readily when the value of the underlying asset (the company) increases.  
+
+Rounds: a set of investors and a fixed amount of capital raised over a set period of time.  Investors in each round invest at the same valuation, the rounds will become larger and the company more valuable as time passes and its operations grow.
+
+Returns: the growth in value of the money invested from the time that the investment was made to the time it was closed out (money returned to investor in the form of cash).  Returns can be reported as absolute (simple end value/start value), or can be annualized (standardized to a yearly return figure; this also accounts for compounding).
+
+Private Market: Unlike stocks that are listed on an exchange, there exists no trading venue for Angel Investments.  This means that once the investment is made, the investor is unable to sell their interest (get money back) until the entire company is liquidated (sold).  Positioning the company for sale and executing a sale on favourable terms is therefore one of the major objectives of the company's management.
+
+Exit: The sale of private angel-backed company.  Angel Investors will only see the return of their investment on exit. This is the preferred outcome.
+
+Acquisition: Can be either price-disclosed (typically through a joint press release) or undisclosed.  Companies might choose to keep their transaction prices confidential for a variety of reasons.  In these cases, a return will be generated for investors, but the amount must be modeled.  This will be one of the primary goals of this project. 
+
+Closure: Another way in which the investment can be resolved (closed out). The company in which Angel invested ceases operations.  Final terminal value of the investment is zero, and returns - 100%.
+
+Portfolio Theory: Considers how the combination of individual securities/positions into a collection/portfolio can reduce the risk of the asset class.  The mechanism is correlation; the underlying theory is that a portfolio of securities with imperfect correlation to each other will outperform on a risk-adjusted basis individual positions. 
+
+### OBJECTIVES
+
+Return exectations are critical for an investor in any asset class. At what type of annual rate should they (investor) expect to see their money grow, and what is the typical deviation around generalized, long-run returns; what is the risk? There is a dearth of information in this space as compared to public equities. In drawing broad conclusions about return and risk, the bulk of the work will be in populating missing data.  We will build theories and models around how the missing data should best be populated, and visualize the characteristics of the resulting data set.
+
+### THE DATASET
+
+Crunchbase is an aggregator of information (primarily qualitiative) around Angel-backed companies.  Their data is private (and expensive) although in 2014 they published publicly a sample of seven trailing years of their data. This data forms the basis for our study.  There are three distinct tables we will use.  
+
+Companies: largely descriptive, includes date of founding, location, name, etc.
+Rounds: also descriptive, but includes the amount of financing secured, dates, etc.
+Acquisitions: describes the exits in the space, including acquirers, date, values
+
+The data has many shortcomings: for seed and angel rounds of investment, the data is largely self-reported by investors themselves rather than being an objective sample. There are some data integrity and cleaning issues that must be addressed.  The dataset captures companies that are Angel financed (our area of focus) but also those with Venture backing and even debt.  While the set is large (54k rows) our study necessarily focuses on a small subset (a few thousand). The dataset is complete in that the categories of data captured are meaningful.  So the analytic steps established here can most certainly form the basis for processing data that may be more complete/of higher qualtiy, in the future.  
+
+
+## PART I: WORKING WITH THE CRUNCHBASE DATA
+
+#### LOAD & TRANSFORM 
+
+We start with the Companies data, keeping only the US based companies that were first funded in 2007 or later.  Remember the most recent data in this set is from end-2014.
+
+```{r}
+#read in the file that includes all the company information for this database
+library(plyr)
+library(dplyr)
+library(ggplot2)
+set.seed(261)
+allcompanies = read.csv("companies.csv")
+```
+
+```{r}
+#keep only the companies that are US-based
+companies <- subset(allcompanies, country_code == "USA")
+#we also want to keep only the companies with first_funded_at dates of 2007 or later
+#first cast this column as a date
+companies$first_funding_at <- format(as.Date(companies$first_funding_at), "%Y/%m/%d")
+#then screen for chosen date
+companies <- subset(companies, first_funding_at >= '2007/01/01')
+nrow(companies)
+#check for completeness in the resulting set; list of rows that have missing values
+nrow(companies[!complete.cases(companies),])
+#what information has been captured for these companies?
+colnames(companies)
+```
+
+After subsetting the data, we have 25,837 rows of which 4,688 are incomplete.  Some of this missing data won't bother us, but in the case of funding_total_usd, it is important.  Our study focuses on companies that raise money from outsiders.  Our conclusions will largely depend on what happens to the dollars these companies raise.  If we don't know in a case (row) how may dollars are involved, it becomes difficult to draw conclusions.  Below, we will remove any companies for which the funding total shows N/A. 
+
+
+#### DATA EXPLORATION
+
+WIN/LOSS RATIO
+
+Starting with the most simple outcome evaluation, let's consider how frequently companies are closed (return falls to zero, all money lost) versus acquired (return is cemented at some non-zero amount).  What is the ratio of each within the total population of companies?
+
+```{r}
+#transform funding column by stripping punctuation & converting to integer
+companies$funding_total_usd <- as.numeric(gsub("[[:punct:]]", "", companies$funding_total_usd))
+#strip out companies funded with too small a pool to be relevant for our audience
+companies <- subset(companies, funding_total_usd > 100000)
+nrow(companies) 
+#replace missing status fields  
+levels(companies$status)[1] <- "unknown"
+table(companies$status)
+#find the ratios
+table(companies$status)[2]/nrow(companies)
+table(companies$status)[3]/nrow(companies)
+```
+
+Counting exits (acquired) as a win (8.2%) and closeds as a loss (4.4%) looks encouraging; the ratio is > 1.  Will the numbers be different if we look at just one vintage of companies?  Let's look just at companies that were funded in 2007, not after.  There are 1276 rows in this subset.
+
+
+```{r}
+companies07 <- subset(companies, first_funding_at <= '2007/12/31')
+nrow(companies07)
+table(companies07$status)
+table(companies07$status)[2]/nrow(companies07)
+table(companies07$status)[3]/nrow(companies07)
+```
+
+Here we see the wins (26.0%) and losses (12.6%) are much higher; an even better ratio.  It seems that spending more time in the market leads to more resolutions (closure or acquisition).  
+
+We can also visualise how younger cohorts of companies skew towards "Operating", while older companies are more likely to be listed as "closed" or "acquired"
+
+```{r}
+#first remove the rows with mising funding totals
+companies3 <- subset(companies, !is.na(companies$funding_total_usd))
+#then plot.  this could look better, specifically the x-axis.
+ggplot(companies3, aes(x = first_funding_at, y = funding_total_usd, col = status, alpha = 0.1)) + geom_jitter(alpha = 0.35) + scale_y_log10() + scale_x_discrete(breaks = c("2007/01/01", "2009/01/01", "2011/01/01", "2013/01/01", "2014/08/15")) + theme (axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### DOLLAR-ON-DOLLAR RETURNS
+
+Let's get more granular, and look not just at the outcome but at the degree of success.  Closure of a business can only result in 100% loss but an exit can clearly generate > 100% returns.  We're working towards a picture of total portfolio returns.
+
+Add two new data sets from the same source: funding rounds (amounts raised) and acquisitions (exit values).  Both will need to be tidied in a similar fashion to our companies table.   
+
+```{r}
+allrounds = read.csv("rounds.csv")
+rounds <- subset(allrounds, company_country_code == "USA")
+rounds$raised_amount_usd <- as.numeric(gsub("[[:punct:]]", "", rounds$raised_amount_usd))
+allacquisitions = read.csv("acquisitions.csv")
+acquisitions <- subset(allacquisitions, company_country_code == "USA")
+acquisitions$price_amount <- as.numeric(gsub("[[:punct:]]", "", acquisitions$price_amount))
+```
+
+In the process of this exploration, some data-quality issues emerge.  We address two of these here.  
+
+First, in acquisitions set: Riot Games was acquired by Tenecet for 400Mm, not the USD 4,000 noted. 
+
+```{r}
+#calling this by index rather than name is dangerous - consider changing
+acquisitions$price_amount[5344] <- 400000000
+```
+
+Second, in companies set: Aptalis Pharma is listed as having raised a single round (173k seed capital) and then proceeding to exit for $2.9Bn.  That would create an impressive return indeed for funders.  The reality is that the company actually was spun out from the merger of two established pharmaceutical giants.  At the date of formation had seven branded products in market, and a robust development pipeline.  There was far more than USD 173k in value within the company.  Because this is incorrect and because the actual nature of the enterprise disqualifies it from this (startup) data set, it comes out as well. 
+
+We want to add this information to our set of companies, created above, for which funding data exists. 
+
+Each of these tables has information useful to our returns analysis.  We need to create a unique key for each, in this case namecity (since many of these companies share names with other, unrelated companies created in different places).  https://smbrate.com/We can also be selective about bringing only useful rows into the joined table. 
+
+```{r}
+nrow(rounds)
+#select just the columns we want to see, and just the rows meeting our "seed or angel funding" criteria
+rounds3 <- subset(rounds, rounds$funding_round_type %in% c("seed", "angel") & raised_amount_usd >= 100000, drop = TRUE, select = c(company_name, company_city, funding_round_type, funded_at, raised_amount_usd))
+nrow(rounds3)
+#create namecity field for proper joining
+rounds3$namecity <- paste(rounds3$company_name, rounds3$company_city)
+#eliminate duplicates
+rounds2 <- distinct(rounds3, company_name, company_city, .keep_all = TRUE)
+nrow(rounds2)
+#check that all the companies thate were in rounds2 are still in rounds3, that only duplicates have been struck
+which(!(as.vector(rounds3$company_name) %in% as.vector(rounds2$company_name)))
+```
+
+Repeat formatting steps for companies and acquisitions tables.
+
+```{r}
+#select just the columns from companies that we want to see in the new dataset
+companies2 <- subset(companies, select = c(name, funding_total_usd, status, state_code, region, city, funding_rounds, founded_year, first_funding_at, last_funding_at))
+#remove Aptalis Pharma
+companies2 <- companies2[!companies2$name == "Aptalis Pharma",]
+acquisitions2 <- subset(acquisitions, select = c(company_name, company_city, acquirer_name, acquired_at, price_amount))
+#we can't simply join on name, since there are a number of unique companies that share a name.  
+#create a new column namecity that includes both the name of the company & the city of its founding
+companies2$namecity <- paste(companies2$name, companies2$city)
+acquisitions2$namecity <- paste(acquisitions2$company_name, acquisitions2$company_city)
+#then join them
+fullset <- merge(x = rounds2, y = companies2, by = "namecity", all.x = TRUE)
+fullset <- merge(x = fullset, y = acquisitions2, by = "namecity", all.x = TRUE)
+```
+
+There are duplicate rows in this merged dataframe.  If we screen using unique, we remove 12 rows that are perfectly identical. There are also companies in here which have been acquired twice (see: Forrst).  Stakeholders may in this case be getting paid twice, but not necessarily.  Further, the amount of the gain in the second case would be the differential between that and the first bid, rather than the entire amount.  This gets tricky, but can be properly addressed only where both prices (acquisition 1 and acquisition 2) are disclosed.
+
+Uniqueness for our case will include name + first funding + acquired date.  Eliminates 474 rows. 
+
+```{r}
+nrow(fullset)
+fullset <- distinct(fullset, name, first_funding_at, acquired_at, .keep_all = TRUE)
+nrow(fullset)
+```
+
+There are also some rows that have been incorrectly classified as "closed" or "unknown" for which an acquirer is listed.  Let's reclassify these.
+
+```{r}
+fullset$status[which(fullset$status %in% c("closed", "unknown") & !is.na(fullset$acquirer_name))] <- "acquired"
+```
+
+As a result of the join, we have several repeating columns.  Let's take them out.
+
+```{r}
+drops <- c("company_name.x", "company_state_code", "company_region", "company_city.x", "company_city.y", "price_currency_code", "company_name.y") 
+fullset <- fullset[ , !(names(fullset) %in% drops)]
+```
+
+And we have to filter out for repeats again.  We'll also use this opportunity to correct several other faulty datapoints.  And to refactor the status variable into a logical order, and add a field (metro) which indicates whether the company is located in one of the two geographic areas associated with greater starup success (as nearly half of these companies are).  We're left with 6043 companies in the study set. 
+
+```{r}
+fullset$acquired_at[fullset$name == "DataPad"] <- "2014-09-30"
+fullset$acquired_at[fullset$name == "Modern Feed"] <- "2009-06-01"
+fullset <- fullset[!fullset$name == "Buccaneer",]
+fullset <- fullset[!(fullset$name == "Roost" & fullset$founded_year == 2013),]
+fullset <- subset(fullset, !is.na(fullset$name))
+#refactor the levels of "status" to correspond with low value = less favourable outcome, high = better
+fullset$status <- ordered(fullset$status, levels = c("closed", "unknown", "operating", "acquired"))
+#assign closed companies a price amount value of 0
+fullset$price_amount[which(fullset$status == "closed")] <- 0 sr
+#create new dummy variable to separate companies in areas of high return
+fullset$metro = ifelse((fullset$region == "SF Bay Area" | fullset$region == "New York City"), 1, 0)
+table(fullset$metro)
+nrow(fullset)
+```
+
+Now we're ready to look at returns.  Angels want to see exits, as that's the only way they're getting the money back, and the source of their returns.  Our "status" field tells us which companies have been acquired and from that we got % exits (successes). We also want dollar-on-dollar % return, which requires acquisition price information (numerator) in addition to total funding information (denominator). Here we see another opportunity to remove corrupt data, specifically OhmData which is purported to have been funded for 185k and acquired for 3Mm just a month later. 
+
+We've also made the judgement to remove WhatsApp from the group. This transaction was an outlier to such an extent that it may unfairly impact our analysis & conclusions. 
+
+```{r}
+#subset for where acquisition price information is disclosed
+acquired <- subset(fullset, price_amount > 1, funding_total_usd >1)
+acquired <- acquired[!acquired$name == "OhmData",] 
+acquired <- acquired[!acquired$name == "WhatsApp",]  #is this the right thing to do?
+acquired <- acquired[!acquired$name == "Medafor",]
+nrow(acquired)
+#create a new column that shows total $ returned to investors against total $ raised
+acquired$return <- acquired$price_amount/acquired$funding_total_usd
+#use sum here instead of averaging the acquired$return column as it's more reflective
+sum(acquired$price_amount)/sum(acquired$funding_total_usd, na.rm = TRUE)
+```
+
+Only 90 of the 6085 companies described as "acquired" in our joined set include pricing information. Still a reasonable sample size, and the numbers are encouraging (8.24X return on total amount raised) but let's look closer.  First, to annualize results. 
+
+Let's create a field that shows annualized returns by company, and then plot these against time to see if there are any interesting trends.
+
+```{r}
+#first convert acquired_at to proper date format
+acquired$acquired_at <- format(as.Date(acquired$acquired_at), "%Y/%m/%d")
+#then to calculate how many days a company spent between funding and acquisition
+acquired$age_at_acquisition <- (as.integer(as.Date(acquired$acquired_at) - as.Date(acquired$first_funding_at)))
+acquired <- subset(acquired, age_at_acquisition >= 1)
+#whiche we then use to calculate annualized returns
+acquired$annual_return <- ((1+ acquired$return) ^ (365.25/as.integer(acquired$age_at_acquisition))) - 1
+plot(acquired$founded_year, acquired$annual_return, log = "y", ylab = "Annualized Returns", xlab = "Date of First Funding")
+```
+
+For companies that were acquired, those founded more recently have generated greater annual returns.
+
+```{r}
+model1 <- lm(annual_return ~ founded_year, data = acquired)
+summary(model1)
+```
+
+The relationship is positive (founded later = higher return) and significant at the 5% threshold.  We can visualise the relationship.
+
+```{r}
+plot(acquired$founded_year, acquired$annual_return)
+abline(lm(annual_return ~ founded_year, data = acquired), lty = 2)
+```
+
+#### DEEP DIVE: AMOUNTS RAISED AND EFFECT ON STATUS & RETURNS
+
+We can also examine the relationship between funding totals and stauts. Does total funding amount reliably influence the staus (operating, closed, acquired) for the company? Remember closed is bad and acquired is good.  Operating can go either way, we address this later in the report.  First we reorder our status factor levels from bad to good.  
+
+```{r}
+fullset$status <- ordered(fullset$status, levels = c("closed", "unknown", "operating", "acquired"))
+#ggplot(fullset, aes(x=status, y=funding_total_usd)) + geom_boxplot() + scale_y_continuous(trans = "log")
+ggplot(fullset, aes(status, funding_total_usd)) + geom_boxplot(colour = "#3366FF") +
+  geom_jitter(width = 0.1, colour = "blue", alpha = 0.2) +
+  scale_y_continuous(trans = "log")
+```
+
+Then we create a model on this factor.
+
+```{r}
+model2 <- lm(as.integer(status) ~ funding_total_usd, data = fullset)
+summary(model2)
+```
+
+Here again we see a relationship significant at the 5% threshold. More funding leads to better outcomes (remember our factor variable status has been ordered). The magic number here is 4 (our "acquired" level: we want these companies to be acquired).
+
+```{r}
+(4 - model2$coefficients[1])/model2$coefficients[2]
+```
+
+This model tells us that companies improve their probability of being acquired when they raise $2.4Bn or more. WHich none of these companies did.  This clearly needs more study.
+
+And then WITHIN outcomes, so for companies specifically that were acquired, did those that received more funding generate higher returns for stakeholders?
+
+```{r}
+#set breaks for each funding bucket, levels came about through trial & error
+grp <- c(-1, .5575, 1.25, 5, 12, 60)
+#set factors & assign names
+acquired$rfact = cut(acquired$annual_return, breaks = grp,labels=c('Subpar','Low', 'Medium','High', 'Bananas'), ordered = TRUE)
+#create a boxplot
+#plot(x = acquired$rfact, y = acquired$funding_total_usd, log = 'y', ylab = "funds raised", xlab = "quality of return")
+ggplot(acquired, aes(x=rfact, y=funding_total_usd)) + geom_boxplot() + scale_y_continuous(trans = "log")
+```
+
+```{r}
+ggplot(acquired, aes(rfact, funding_total_usd)) + geom_boxplot(colour = "#3366FF") +
+  geom_jitter(width = 0.1, colour = "blue") +
+  scale_y_continuous(trans = "log")
+```
+
+Here again we can see that companies are most likely to appear generate "bananas" returns if they've raised less money.  Likewise, those companies that have raised the most are in the lower-tier returns buckets.  Interesting!
+
+Is it a statistically significant relationship?  Let's get the z score.
+
+```{r}
+#there must be an easier way to do this
+ftusd <- sd(acquired$funding_total_usd, na.rm = TRUE)
+ftumn <- mean(acquired$funding_total_usd, na.rm = TRUE)
+a <- subset(acquired, acquired$rfact == "Bananas")
+amean <- mean(a$funding_total_usd)
+(amean - ftumn)/(ftusd/(sqrt(nrow(a))))
+```
+
+```{r}
+b <- subset(acquired, acquired$rfact == "Subpar")
+bmean <- mean(b$funding_total_usd)
+(bmean - ftumn)/(ftusd/(sqrt(nrow(b))))
+```
+
+Returns in the Subpar category are much more of an outlier than those in the Bananas category. Raising large amounts of money is coincident with lower returns.
+
+Your company will very likely be acquired if you've raised gobs of money, but the resulting returns are likely to be low.
+
+Finally, we'll eliminate the rfact column as it is no longer needed.
+
+```{r}
+acquired$rfact <- NULL
+```
+
+
+#### OTHER EXPLORATIONS
+
+We also know that companies in major metropolitan areas (Bay Area and New York specifically) tend to attract more attention and therefore improved exit opportunities.  
+
+```{r}
+model3 <- lm(as.numeric(status) ~ metro, data = fullset)
+summary(model3)
+```
+
+This is a very significant relationship.  Companies that are located in NY & SF are much more likely to see a positive outcome (more acquireds, fewer closeds) than companies in other regions of the country. 
+
+In summary, we know that greater amounts of funding and a favourable geographic location influence positively the likelihood of a positive outcome for these companies, as do later founding years. 
+
+#### POPULATING MISSING ACQUISITION PRICES
+
+We know what returns on our fully-documented transactions are, but in order to get a full picture of returns, we need to take into account the other transactions as well.  For this we'll go back to our fullset and work to understand the metrics here.  We can step closer to the truth on returns by keeping sum of disclosed prices in the numerator, but changing the denominator to all the funds put to work during this same period.
+
+```{r}
+sum(acquired$price_amount)/sum(acquired$funding_total_usd)
+sum(acquired$price_amount)/sum(fullset$funding_total_usd)
+```
+
+This gives us a sense of the magnitude of effect including our incomplete cases in the analysis will have.  We can't simply assume that the start by differentiating priced/acquired from unpriced/acquired
+
+We'll need an age column for the remaining companies also.  For those that haven't been acquired, and remain ongoing, this will be the end of the study period.  For those that are closed, we assume a final operating date that is a full year after their last fundraise.  For those that continue operating, and for the unknowns, this will be the end of the study period.  This column will be used to calculate annual (rather than absolute) returns.  
+
+```{r}
+fullset$last_funding_at <- format(as.Date(fullset$last_funding_at), "%Y/%m/%d")
+end <- as.Date("12/31/14", "%m/%d/%y")
+fullset$age <- ifelse(fullset$status == "acquired", as.integer(as.Date(fullset$acquired_at) - as.Date(fullset$first_funding_at)), ifelse(fullset$status == "closed", as.integer((as.Date(fullset$last_funding_at))+365.25) - as.integer(as.Date(fullset$first_funding_at)), as.integer(end - as.Date(fullset$first_funding_at))))
+```
+
+And some cleaning here.
+
+```{r}
+#remove the rows that show negative ages for companies
+fullset <- subset(fullset, age >= 1)
+#what do ages look like for companies in different "status" buckets?
+fullset %>%  group_by(status) %>% 
+          summarise(raised = sum(funding_total_usd), rounds = mean(funding_rounds), age = mean(age))
+```
+
+Now we'll separate out those companies that are acquired at undisclosed prices, as we did above with those that were acquired and disclosed.  We'll call this new table "guess". There are 350 companies in this group. 
+
+```{r}
+table(fullset$status)
+guess <- subset(fullset, fullset$status == "acquired" & is.na(fullset$price_amount), drop = TRUE)
+nrow(guess)
+```
+
+Let's have a crack at populating the "price_amount" column for these companies.  The distribution should reasonably resemble that of our "priced acquired" group.  Which is long-tailed with a single outlier: nPulse Technology, which was acquired in less than a year for 23X the invested amount, for annual return of 470%. Wow.
+
+```{r}
+hist(acquired$annual_return, breaks = 80, xlim = c(0,18))
+acquired[54,c(5, 6, 15, 16, 20)]
+```
+
+Much of the modelling work done above described influences on "status", which is already known for this group.  Let's see if some other numeric fields in our table will tell us about price.  At the 1% significance level, companies with greater ages are acquired for higher prices.  Each additional day add $117k to valuation, after 160 days.  Not bad.  
+
+```{r}
+model4 <- lm(price_amount ~ age_at_acquisition, data = acquired)
+summary(model4)
+```
+
+And a visualisation: 
+
+```{r}
+ggplot(acquired, aes(age_at_acquisition, price_amount)) +
+ geom_point(aes(color = funding_rounds)) + 
+ scale_color_gradient(low = "green", high = "red") +
+ geom_smooth(method ="lm") +
+ scale_y_continuous(trans = "log2") +
+  scale_x_continuous(trans = "log2")
+```
+
+
+
+So age influences price in a meaningful way.  Older (which not surprisingly means more total funding) companies recieve higher prices on acquisitions.
+
+Now to populate our missing price fields, using the information from our model: that older companies are worth more.
+
+There's no reason to believe that the returns generated on exit by this group are distributed differently than for our "price-disclosed" group.  So we'll assign returns to the "price undisclosed" group that are sampled from the same distribution.
+
+We create a checkpoint here where we can experiment with modelling and come back to our unadjusted sets to reset if necessary
+
+```{r}
+acquired2 <- acquired
+guess2 <- guess
+```
+
+```{r}
+#here we can reset
+acquired <- acquired2
+guess <- guess2
+```
+
+If we use returns from ourprice disclosed set to populate the missing fields within our price undisclosed set, the "acquisition price" numbers that result can in some instances be far too high.  This happens when returns from a short-lived company (which may be high) are randomly assigned to a long-lived recipient (power of compounding)
+
+In order toadjust for this, we need to break the returns into two subgroups: young companies (which are distributed toward higher returns) and old companies (lower returns).  
+
+```{r}
+#start by capturing the 87 documented returns from price populated set into two different lists
+#guessreturnold <- acquired$annual_return[which(acquired$age_at_acquisition >= mean(acquired$age_at_acquisition))]
+#length(guessreturnold)
+#guessreturnyoung <- acquired$annual_return[which(acquired$age_at_acquisition < mean(acquired$age_at_acquisition))]
+#length(guessreturnyoung)
+#then we draw randomly (with replacement) from that vector to populate the 381 "acquired price unknown" rows
+#this ensures that the distribution of returns between our "disclosed" and "undisclosed" groups are the same
+#guess$inferred_return[which(guess$age >= mean(guess$age))] <- sample(guessreturnold, size = length(which(guess$age >= #mean(guess$age))), replace = TRUE)
+#guess$inferred_return[which(guess$age < mean(guess$age))] <- sample(guessreturnyoung, size = length(which(guess$age < #mean(guess$age))), replace = TRUE)
+#we then work backward from the assigned annual return number to calculate the implied price amount
+#guess$inferred_price <- guess$funding_total_usd * (exp((log(guess$inferred_return + 1)) * (as.integer(guess$age)/365.25)))
+```
+
+
+
+The building blocks of this inference are the funding total, and the return applied to that amount.  Let's have a closer look at funding totals between our two groups.  
+
+```{r}
+par(mfrow=c(2,2))
+hist(guess$funding_total_usd, breaks = 500, xlim = c(0, 10000000))
+hist(acquired$funding_total_usd, breaks = 500, xlim = c(0, 10000000))
+par(mfrow=c(1,1)) 
+```
+
+Since the companies for which we'll have to infer our prices are quite concentrated at funding levels <$2Mm, we'll have to be very deliberate about how we infer returns at this level.  Let's look at the distribution of returns from our "acquired disclosed" dataset, under 2Mm total funding.  There are 28 of these. We'll start building our inferred returns with the 206 companies in our "guess" set that fall into the same funding bucket.
+
+```{r}
+length(which(acquired$funding_total_usd < 2000000))
+#is it better to populate these based on a returns number
+par(mfrow=c(2,2)) 
+hist(acquired$annual_return[which(acquired$funding_total_usd < 2000000)], main = "Acquired Returns")
+#or better to use a price number
+hist(acquired$price_amount[which(acquired$funding_total_usd < 2000000)], breaks = 50, xlim = c(0,75000000), main = "Acquired Prices")
+par(mfrow=c(1,1)) 
+smallAcquired <- subset(acquired, acquired$funding_total_usd < 2000000)
+smallReturns <- acquired$annual_return[which(acquired$funding_total_usd < 2000000)]
+length(which(guess$funding_total_usd < 2000000))
+```
+
+Then we can assign returns randomly to our small group using sampling:
+
+```{r}
+guessA <- subset(guess, guess$funding_total_usd < 2000000)
+guessA$inferred_return <- sample(smallReturns, size = nrow(guessA), replace = TRUE)
+guessA$method <- "A"
+```
+
+And then for the remaining (>2Mm funding) groups we have to be careful again, the distribution has a very long right tail.  We lose some of the nuance if we fail to include these outliers, yet we also must be careful to apply high returns multipliers appropriately.  We do this by subsetting into age brackets.
+
+```{r}
+guessB <- subset(guess, guess$funding_total_usd >= 2000000 & guess$age >= mean(acquired$age_at_acquisition))
+guessC <- subset(guess, guess$funding_total_usd >= 2000000 & guess$age < mean(acquired$age_at_acquisition))
+(nrow(guessA) + nrow(guessB) + nrow(guessC) == nrow(guess))
+bigOldReturns <- acquired$annual_return[which((acquired$age_at_acquisition >= mean(acquired$age_at_acquisition)) & (acquired$funding_total_usd >= 2000000))]
+#and then we remove the max value in this vector, as it creates massive problems for us later
+#and can fairly be dismissed as an outlier
+#bigOldReturns <- bigOldReturns[!bigOldReturns %in% c(max(bigOldReturns))]
+bigOldReturns <- bigOldReturns[which(bigOldReturns < quantile(bigOldReturns)[4])]
+#and do the same with our YoungReturns
+bigYoungReturns <- acquired$annual_return[which(acquired$age_at_acquisition < mean(acquired$age_at_acquisition) & (acquired$funding_total_usd >= 2000000))]
+#bigYoungReturns <- bigYoungReturns[!bigYoungReturns %in% c(max(bigYoungReturns))]
+bigYoungReturns <- bigYoungReturns[which(bigYoungReturns < quantile(bigYoungReturns)[4])]
+#(length(smallReturns) + length(bigOldReturns) + length(bigYoungReturns)) == nrow(acquired)
+guessB$inferred_return <- sample(bigOldReturns, size = nrow(guessB), replace = TRUE)
+guessB$method <- "B"
+guessC$inferred_return <- sample(bigYoungReturns, size = nrow(guessC), replace = TRUE)
+guessC$method <- "C"
+guess <- rbind(guessA, guessB, guessC)
+```
+
+Check out the inferred returns distribution see if it looks correct at the low end.
+
+```{r}
+par(mfrow=c(2,2)) 
+hist(acquired$annual_return, breaks = 30, xlim = c(0,20))
+hist(guess$inferred_return, breaks = 30, xlim = c(0,20))
+par(mfrow=c(1,1)) 
+```
+
+And then we can use the inferred annual return alongside age to generate inferred prices for our group:
+
+```{r}
+guess$inferred_price <- guess$funding_total_usd * (exp((log(guess$inferred_return + 1)) * (as.integer(guess$age)/365.25)))
+```
+
+
+Let's have a quick look to see if our resulting inferred prices look correct-ish. We want to see if the inferred_prices we've generated are reasonable relative to those that are known. 
+
+```{r}
+#guess$method <- "inferred"
+acquired$method <- "reported"
+plot1 <- subset(guess, select = c("inferred_return", "inferred_price", "age", "method"))
+plot2 <- subset(acquired, select = c("annual_return", "price_amount", "age_at_acquisition", "method"))
+colnames(plot1) <- c("return", "price", "age", "method")
+colnames(plot2) <- c("return", "price", "age", "method")
+plot3 <- rbind(plot1, plot2)
+ggplot(plot3, aes(price, fill = method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+ggplot(plot3, aes(age, fill = method)) + geom_histogram(alpha = 0.5, aes(y = ..density..), position = 'identity', binwidth = 60)
+ggplot(plot3, aes(return, fill = method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+```
+
+```{r}
+sum(acquired$price_amount)/sum(acquired$raised_amount_usd)
+sum(guess$inferred_price)/sum(guess$funding_total_usd)
+```
+
+This doesn't look right.  Using graphics to understand where our sampling process has broken down, it appears our GroupA is problematic.  Let's look closer at this group: collect into vectors the assumptions and the resulting assignments, and compare them.
+
+```{r}
+smallReturnsB <- guess$inferred_return[which(guess$method == "A")]
+smallPrices <- acquired$price_amount[which(acquired$funding_total_usd < 2000000)]
+smallPricesB <- guess$inferred_price[which(guess$funding_total_usd < 2000000)]
+summary(smallReturns)
+summary(smallReturnsB)
+summary(smallPrices)
+summary(smallPricesB)
+```
+
+The returns distributions for the group we've sampled from and the group we've inferred match, by design.  The prices are mismatched, with the guessA prices appearing too high.  This has to do with the fact that our "guess" group has in general raised less money than the acquired group.  Let's try modelling this instead. We'll revisit out model4 using just the small companies.
+
+```{r}
+model5 <- lm(annual_return ~ age_at_acquisition, data = smallAcquired)
+summary(model5)
+```
+
+Let's use this model instead to populate returns for our guessA group.
+
+```{r}
+guessA$inferred_return <- model5$coefficients[1] + model5$coefficients[2]*guessA$age
+#some of these acquired companies are so old the model has assigned them negative returns
+#let's fix that, by assigning the minimum value from our smallAcquired returns
+guessA$inferred_return[which(guessA$inferred_return < 0)] <- quantile(smallAcquired$annual_return)[1]
+```
+
+And then re-run the comparison.
+
+```{r}
+guess <- rbind(guessA, guessB, guessC)
+guess$inferred_price <- guess$funding_total_usd * (exp((log(guess$inferred_return + 1)) * (as.integer(guess$age)/365.25)))
+guess$method <- "inferred"
+plot1 <- subset(guess, select = c("inferred_return", "inferred_price", "age", "method"))
+plot2 <- subset(acquired, select = c("annual_return", "price_amount", "age_at_acquisition", "method"))
+colnames(plot1) <- c("return", "price", "age", "method")
+colnames(plot2) <- c("return", "price", "age", "method")
+plot3 <- rbind(plot1, plot2)
+ggplot(plot3, aes(price, fill = method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+ggplot(plot3, aes(age, fill = method)) + geom_histogram(alpha = 0.5, aes(y = ..density..), position = 'identity', binwidth = 60)
+ggplot(plot3, aes(return, fill = method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+```
+
+
+
+
+```{r}
+summary(acquired$price_amount)
+summary(guess$inferred_price)
+summary(acquired$annual_return)
+summary(guess$inferred_return)
+```
+
+
+#### REXAMINING RETURNS FOR THE GROUP
+
+Let's recombine our acquired and guess sets into a single table of "exits".  This will give us a better sense for overall portfolio returns.
+
+```{r}
+acquired$return <- NULL
+colnames(acquired)[19] <- "age"
+guess$price_amount <- guess$inferred_price
+guess$inferred_price <- NULL
+colnames(guess)[20] <- "annual_return"
+colnames(guess) == colnames(acquired)
+```
+
+And now that the tables match, we merge them together.  Since we've taken pains to ensure that the columns all match, we can use an rbind.
+
+```{r}
+exits <- rbind(acquired, guess)
+```
+
+Now we can have a more realistic view of annual returns for the full set:
+
+```{r}
+sum(exits$price_amount)/sum(fullset$funding_total_usd)
+```
+
+So these companies as a whole, over the seven years noted, returned 77.3% of the capital that was invested in them.  Keeping in mind that those that were funded later may not yet be sufficiently mature to have generated any return, we can look year-by-year.
+
+For 2007, 2008 & 2009:
+
+```{r}
+exits07 <- subset(exits, first_funding_at <= '2007/12/31' & !is.na(acquired_at))
+funding07 <- subset(fullset, first_funding_at <= '2007/12/31')
+sum(exits07$price_amount)/sum(funding07$funding_total_usd)
+exits08 <- subset(exits, first_funding_at <= '2008/12/31'& first_funding_at > '2007/12/31' & !is.na(acquired_at))
+funding08 <- subset(fullset, first_funding_at <= '2008/12/31'& first_funding_at > '2007/12/31')
+sum(exits08$price_amount)/sum(funding08$funding_total_usd)
+exits09 <- subset(exits, first_funding_at <= '2009/12/31'& first_funding_at > '2008/12/31' & !is.na(acquired_at))
+funding09 <- subset(fullset, first_funding_at <= '2009/12/31'& first_funding_at > '2008/12/31')
+sum(exits09$price_amount)/sum(funding09$funding_total_usd)
+```
+
+This means that of the total amound invested in companies founded in 2007, 103% came back to investors via exits by 2014.  Let's see if we can visualise this.  On the x axis are our dates, from 2007 - 2014.  The y axis is log(dollars).  Black points show raises (investors put money into the company) and the red points are exits (investors recieve money back).
+
+```{r}
+ggplot(funding07, aes(x=funded_at, y=raised_amount_usd)) + geom_point() + geom_point(aes (x = acquired_at, y = price_amount), col = "red") +   scale_y_continuous(trans = "log") + scale_x_discrete(breaks = c("2007-01-01", "2008-01-23", "2011-03-04", "2013-01-14"))
+```
+
+We can also create a dataset that considers each round of funding for our 2007 cohort of companies.  We won't use this today except to create it from our list of those companies receiving initial funding in 2007/
+
+```{r}
+names07 <- as.vector(funding07$name)
+rounds07 <- subset(rounds3, company_name %in% names07)
+```
+
+The 30% figure (dollars returned/dollars invested) is concerning, as it represents an overall negative return on the capital dedicated to this space.  Given the risk profile, investors would fairly expect significantly higher returns.  Indeed, the most common figure for annual return expectation offered within the industry (Wiltbank & others) is 20% or more. Now, were that actually the case, the USD 4.9Bn invested in those companies first funded in 2007 would have grown to USD 17.5Bn realised returns by 2014, not the $2.8Bn actually reported.  This is a significant gap, and suggests that those within industry who parrot the 20% number are way off.  
+
+```{r}
+sum(funding07$funding_total_usd)
+sum(exits07$price_amount)
+sum(funding07$funding_total_usd)*(1.2^7) - sum(exits07$price_amount)
+```
+
+#### ASSIGNING VALUE TO OPERATING COMPANIES
+
+We can also look at the distribution of ages at which these companies were acquired:
+
+```{r}
+acqd_ages <- c(as.vector(t(exits07$age)), as.vector(t(exits08$age)), as.vector(t(exits09$age)))
+hist(acqd_ages)
+mean(acqd_ages)
+```
+
+And compare this set to those of our "still-operating companies".  The idea here being that some of the companies that were listed as "operating" (and therefore without value in our returns analysis) may have gone on to be acquired (monetised) beyond our study horizon.  
+
+```{r}
+operators <- subset(fullset, status == "operating")
+par(mfrow=c(2,2)) 
+hist(operators$age, breaks = 50)
+hist(acqd_ages, breaks = 50)
+par(mfrow=c(1,1))
+```
+
+#### K-MEANS CLUSTERING
+
+We can also use clustering to determine if there are any relationships in our data that we may have missed with our linear regressions and exploratory data analysis.  We'll study exits specifically.  First we'll size the dataset down to just the columns that are numeric. Then we'll use the NbClust package to plot a chart an see if there are any cluster counts that make more sense than the others.
+
+```{r}
+library(NbClust)
+smallexits <- subset(exits, !is.na(founded_year) & annual_return > 0, select = c(funding_total_usd, founded_year, price_amount, metro, age, annual_return))
+
+wssplot <- function(data, nc=15, seed=1234){
+	              wss <- (nrow(data)-1)*sum(apply(data,2,var))
+           	    for (i in 2:nc){
+                  set.seed(seed)
+                  wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+	                
+		            plot(1:nc, wss, type="b", xlab="Number of Clusters",
+	                        ylab="Within groups sum of squares")
+	   }
+
+wssplot(smallexits)
+```
+
+They plot is pretty smooth so we'll choose 5 for our number of clusters.
+
+```{r}
+smallset <- subset(fullset, !is.na(founded_year), select = c(funding_total_usd, status, founded_year, metro, age))
+savethis <- as.numeric(smallset$status)
+smallset$status = NULL
+invisible(scale(smallset))
+smallfit <- kmeans(smallset, centers = 5 )
+table(smallfit$cluster, savethis)
+library(cluster)
+clusplot(pam(smallexits, 5))
+```
+
+Here you can see the effect of outliers on our clustering.  Reading the columns left to right, nearly all of our companies listed as closed or unknown are grouped in Cluster 5.  Clusters 1 and 4 are particularly small, containing just 4 and 8 observations respectively.  I'd like to have a look at which rows in the set these outliers are, but don't quite know how to do this.
+
+We can also see from this clustering that our "closed" companies appear in two clusters: 3 and 5.  Also in Cluster 5 are 278 of our companies listed as "operating".  Are these companies at greater risk for closure?  If we had access to subsequent years data (say 2015 - 17) we might be able to test this theory (see: FUTURE WORK, below).
+
+Let's use another approach for clustering. We'll use five groups again.
+
+```{r}
+k = 5
+KMC = kmeans(smallexits, centers = k, iter.max = 1000)
+str(KMC)
+exitclusters = KMC$cluster
+KMC$centers
+```
+
+Cluster 2 contains the greatest number of observations at 203.  This is the group that raised a very small amount of money relative to the others, but exited quickly and generated excellent returns.  
+
+#### RESULTS
+
+Based on the information in this dataset, and using assumptions for our missing values that feel quite reasonable, we can fairly conclude that returns in this space are quite low.  Rather than the 20% annual return espoused by industry organisations and some leaders, it appears that returns are significantly negative.  
+
+The data does suggest there are factors that are influential in more positive outcomes (thus increasing returns above the noted averages): companies in NY & the Bay Area are more likely to achieve exits.  Companies that secure through their lifetimes billions of dollars in funding are also more likely to achieve an exit.  Although moving into this domain of extreme levels of funding also acts as a decelerator on returns.  
+
+Our very best observed returns are generated by companies with only one or two rounds of funding for a total of a million or so dollars, are in the market for a year or two, and subsequently sold for USD10 to 70Mm.  
+
+Companies that register as closed generally did a single raise of just less than a million before going out of business.  Sound familiar?  Closed and acquireds have characteristics that read as similar in this dataset.  Is the difference between them a matter of luck or just beyond the scope of the data we've gathered here?
+
+#### FUTURE WORK
+
+This area warrants further study.  Additional data fields, particularly those that are numeric in nature, would allow us to test different relationships between outcomes and company characteristics.  The industry is also notoriously opaque, and such data where it exists, is extremely expensive (Pitchbook charges USD20,000 for an annual subscription).  Until data democratization arrives in this field, these may be the best conclusions we can draw.
+
+Should Crunchbase release additional years of this limited data to the public, I'd love to test some of the hypotheses presented.  Given additional time, I'd love also to populate valuation estimates around the operating companies, which is a good portion of the dataset.
+
+For now, the main conclusion/takeaway is that investing in this space is a fool's errand.  Clearly I need a new profession.
+
+
+#### FOLLOW UP
+
+Remember this dataset was captured at a point in time.  Today Crunchbase has been updated with more current/complete information.  230 companies now fit our criteria for "acquired disclosed".  Let's see if the characteristics resemble what we have been working with
+
+```{r}
+#load the data
+check1 = read.csv("oldacqd.csv")
+#here is the list of names that were not included in our first set.  Some of these we deliberately took out.
+names <- check1$Acquired.Company.Name[which(!(as.vector(check1$Acquired.Company.Name) %in% as.vector(acquired$name)))]
+```
