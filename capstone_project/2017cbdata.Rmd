@@ -1,0 +1,277 @@
+---
+title: "Angel Returns 2007 - 17"
+author: "Carlee Price"
+date: "October 31, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A look at returns in the Angel space, 2007 - 2017
+
+We've captured data from companies in the Crunchbase dataset that are US-based, were first funded with either Seed or Angel capital totalling at least $100k between Jan 01, 2007 and Sept 26, 2017.  There are 6,727 rows and 19 columns.  The data was processed and cleaned as a separate project, which can be seen here. 
+
+Conclusions in this report rely on a "best efforts" approach around assumptions and are always subject to change. Assumptions will always be stated and logically supported.  Without these assumptions, there are no conclusions. 
+
+```{r}
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+data <- read.csv("cleancb.csv")
+data$X <- NULL
+nrow(data)
+colnames(data)
+attach(data)
+```
+
+Here we address some data-quality issues that emerge as the work progresses.
+
+```{r}
+#aardvark was acquired by Google in 2010 for $50Mm (verified by TechCrunch)
+data$Price[which(data$Company.Name == "Aardvark")] <- 50000000
+```
+
+
+First a very simple, top-level view of the information.
+
+```{r}
+table1 <- as.data.frame(table(Status))
+transform(table1, Relative = prop.table(Freq))
+```
+Of the companies in this dataset, 4.3% were closed during the study period, 0.2% went public, 12.0% were acquired, and 83.5% were still operating at the end of the period. We can also look at the mean age for the companies that fell into each bucket.
+
+```{r}
+ddply(data, .(Status), summarize, MeanAge=mean(Age))
+```
+
+Some of these companies may simply have not "baked" long enough to have reached their ultimate outcome. If we subset for companies that were first funded 1,016 days before our end date we might get different figures.  % of companies operating should fall. 
+
+```{r}
+data$First.Funding <- as.Date(data$First.Funding)
+data2 <- subset(data, First.Funding < '2015-12-14')
+table2 <- as.data.frame(table(data2$Status))
+transform(table2, Relative = prop.table(Freq))
+```
+
+Indeed we see that the % of companies listed as Operating is lower here (76.8%) and Closeds (6.1%), Acquireds (16.9%) and IPOs (0.3%) are all higher. 
+
+Let's have a look graphically at the evolution of these companies over time.  Age is on the x-axis, Total Funding amounts (log transformed) on the Y-axis.  Point colour reflects the status of each company.
+
+```{r}
+ggplot(data, aes(x = Age, y = Total.Funding.Amount, col = Status, alpha = 0.1)) + geom_jitter(alpha = 0.35) + scale_y_log10()
+```
+
+Let's strip the Operating companies out and have another look.  
+
+```{r}
+data3 <- subset(data, Status != "Operating")
+ggplot(data3, aes(x = Age, y = Total.Funding.Amount, col = Status, alpha = 0.1)) + geom_jitter(alpha = 0.35) + scale_y_log10()
+```
+
+We can see another interesting relationship here.  The companies that executed an IPO raised SIGNIFICANTLY more on average than the other companies.  Obvious, but still interesting to see the numbers: $424.2Mm on average.
+
+```{r}
+ddply(data, .(Status), summarize, MeanTotFunding=mean(Total.Funding.Amount), SDFunding = sd(Total.Funding.Amount))
+```
+
+There also appears to be a fairly reliable relationship between the passage of time and the total amount raised.  Let's take a closer look.
+
+```{r}
+datamod1 <- lm(Total.Funding.Amount ~ Age, data = data)
+summary(datamod1)
+```
+
+The slope of this line is highy significant (p is tiny), but is not full explanatory (R-squared is small).  The model suggests that companies (on the whole) consume 23k in raised funds each day they're in operation, but that there are a host of other factors that affect the amount they raise aside from the passage of time.
+
+Let's take a high-level view of this dataset.  We know these companies (6,727 of them) raised $92Tn in the study period.  How did activiy change through the study period?  A histogram tells us that the number of companies seeking funding increased yearwise (note that 2017 is an incomplete year). We can also see that aggregate amounts raised decreased after 2011.  So the average total raised (remembering that the Year here is the first year of funding, and that the total raise would include subsequent years) has been falling.
+
+Another quick note in regard to the number of companies funded: steady and marked increase from 2007 onward reflects an increase in activity but *may also reflect characteristics of the platform from which the data was gathered*.  If Crunchbase became more active during this period, and better at collecting data (which anectdotal data suggest they did) these numbers would have increased disproportionately to the increase in real activity.
+
+```{r}
+nrow(data)
+sum(data$Total.Funding.Amount)
+#table1 <- as.data.frame(table(cut(data$First.Funding, breaks="year")))
+data$Funding.Year <- sapply(strsplit(as.character(data$First.Funding),'-'), "[", 1)
+data$Funding.Year <- as.numeric(data$Funding.Year)
+table2 <- ddply(data, .(Funding.Year), summarize, Agg.Funding=sum(Total.Funding.Amount), Deal.Count = length(Total.Funding.Amount))
+ggplot(table2, aes(Funding.Year, Agg.Funding)) +geom_bar(stat = "identity")
+ggplot(table2, aes(Funding.Year, Deal.Count)) +geom_bar(stat = "identity")
+table2$Avg.Total.Raise = table2$Agg.Funding/table2$Deal.Count
+table2
+```
+
+We can also look by year at what the outcomes for these companies were: will tell us where exit activity begins to drop off and may indicate whether any particular years brought more success than others.
+
+```{r}
+ggplot(data, (aes(Funding.Year))) + geom_bar(aes(fill=Status))
+```
+
+So indeed it looks like a cohort needs at least four years to begint o see exits, acquisitions, etc.  Meaning any company in our set of 2013 or early may not be at a stage yet to be judged on outcome.  We can also use factor levels to judge outcomes across a vintage of companies.
+
+So we suspect that the most successful companies (based on their success at fundraising at least) were 2010 vintage.  In order to have a closer look, we refactor Status in order make numeric determinations around outcomes.  This factor list is ordered, and higher = better outcome. 
+
+```{r}
+data$Status <- ordered(data$Status, levels = c("Closed", "Operating", "Was Acquired", "IPO"))
+table3 <- ddply(data, .(Funding.Year), summarize, Avg.Outcome=mean(as.numeric(Status)))
+ggplot(table3, aes(Funding.Year, Avg.Outcome)) +geom_bar(stat = "identity") + coord_cartesian(ylim=c(2, 2.4))
+```
+
+We can see that 2007 and 2009 were actually the most "successful" years for Seed-funded companies. Some of these from later vintages will need more time to successfully resolve, but for 6+ year old companies we should know with a level of confidence the outcome.
+
+##Building out returns estimates for Acquired Companies
+
+We can measure returns in a number of ways. We have good detail on the total amount of money that went IN to these companies.  We have some information of what they generated on exit.  Using just what has been reported as fact, so just acquisitions that happened at disclosed values, investors got 16.5% of their money back.  When we add IPOs to the mix, the number increases to 78%.
+
+```{r}
+#compare disclosed acquisition prices with total funds deployed in the space.
+sum(data$Price, na.rm = TRUE)/sum(Total.Funding.Amount)
+(sum(data$Price, na.rm = TRUE)+sum(data$Valuation.at.IPO, na.rm = TRUE))/sum(Total.Funding.Amount)
+```
+
+But this isn't the entire picture.  Of the 806 companies in our dataset that were acquired, 706 are missing pricing information.  
+
+```{r}
+length(which(data$Status == "Was Acquired"))
+sum(is.na(data$Price[which(data$Status == "Was Acquired")]))
+```
+
+We can make fair assumptions based on what we know from our acquired/disclosed set regarding where these other transactions may have been priced. Without populating this missing data, we will not be able to draw broad conclusions about returns in the space.  First, let's start calculating returns using the information we have.
+
+```{r}
+#data2 = priced acquired
+#data3 = unpriced acquired
+#subset data to include just the priced/acquired companies
+data2 <- subset(data, Status == "Was Acquired" & Price > 1)
+data3 <- subset(data, Status == "Was Acquired" & is.na(Price))
+data4 <- subset(data, Status != "Was Acquired")
+#at what prices were these companies acquired?
+ggplot(data2, aes(Price)) +geom_histogram() + scale_x_log10()
+#calculate total return
+data2$Total.Return <- data2$Price/data2$Total.Funding.Amount
+ggplot(data2, aes(Total.Return, Age)) +geom_point() + scale_x_log10()
+#annualized return
+data2$Annual.Return <- ((1+ data2$Total.Return) ^ (365.25/as.integer(data2$Age))) - 1
+ggplot(data2, aes(Annual.Return, Age)) +geom_point() + scale_x_log10()
+ggplot(data2, aes(Annual.Return, Total.Funding.Amount)) +geom_point() + scale_x_log10() + scale_y_log10()
+```
+
+It doesn't look like funding amounts are going to tell us much about returns.  Let's verify.
+
+```{r}
+datamod2 <- lm(Annual.Return ~ Total.Funding.Amount, data = data2)
+summary(datamod2)
+```
+
+As suspected, the returns numbers are unrelated to funding amounts. Raising more money does not improve the return. Nor does the passage of time.  
+
+```{r}
+datamod3 <- lm(Annual.Return ~ Age, data = data2)
+summary(datamod3)
+```
+
+Perhaps if we break the sample into those who raised slightly less money (< median for the group, or 6.5Mm) and those who raised more, we might start to add some granularity here.  Let's then see if returns are different amoung these two acquired subgroups.
+
+```{r}
+hist(data2$Age)
+hist(data2$Total.Funding.Amount)
+cutpoint <- summary(data2$Total.Funding.Amount)[3]
+#break the group into two at the median
+data2a <- subset(data2, data2$Total.Funding.Amount > cutpoint)
+data2b <- subset(data2, data2$Total.Funding.Amount <= cutpoint)
+#test if the population mean Annual.Return between the two samples is different
+t.test(data2a$Annual.Return, data2b$Annual.Return)
+```
+
+There is a difference: companies that raise less, return more.  Although this calculation is impacted by a single transaction: Mapsense, which was acquired for 10X the invested amount just 110 days after funding, for a 2670% Annualized Return.  Significant distortions can occur when annualizing short-horizon numbers.  For this very reason, it's valuable to create buckets of investment rather than individual companies.
+
+But back to our work estimating Price fields for our Acquired Undisclosed companies.
+
+```{r}
+datamod4 <- lm(Annual.Return ~ Age, data = data2b)
+summary(datamod4)
+```
+
+Interesting -- here we see a negative slope, companies effectively generating lower returns the older they are.  Let's use this model  to populate returns for our those companies in our data3 group. We're going to arbitrarily reduce that intercept slightly, to account for the fact that undisclosed acquisitions are likely to be less favourable for investors (who like to publicise their wins).
+
+```{r}
+datamod5 <- lm(log(Annual.Return) ~ Age, data = data2)
+summary(datamod5)
+#we arbitrarily shift the regression line on our unpopulated set unitwise by a factor of .85 to 
+#acknowledge that the returns here are lower categorically than for our priced/acquired group
+data3$Inferred.Return <- exp((datamod5$coefficients[1]-.85) + datamod5$coefficients[2]*data3$Age)
+summary(data3$Inferred.Return)
+summary(data2$Inferred.Return)
+data3$Inferred.Price <- data3$Total.Funding.Amount * (exp((log(data3$Inferred.Return + 1)) * (as.integer(data3$Age)/365.25)))
+data3$Method <- "Inferred"
+data2$Method <- "Reported"
+plot1 <- subset(data3, select = c("Inferred.Return", "Inferred.Price", "Age", "Method", "Total.Funding.Amount"))
+plot2 <- subset(data2, select = c("Annual.Return", "Price", "Age", "Method", "Total.Funding.Amount"))
+colnames(plot1) <- c("Return", "Price", "Age", "Method", "Funding.Total")
+colnames(plot2) <- c("Return", "Price", "Age", "Method", "Funding.Total")
+plot3 <- rbind(plot1, plot2)
+ggplot(plot3, aes(Price, fill = Method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+ggplot(plot3, aes(Age, fill = Method)) + geom_histogram(alpha = 0.5, aes(y = ..density..), position = 'identity', binwidth = 60)
+ggplot(plot3, aes(Return, fill = Method)) + geom_density(alpha = 0.2) + scale_x_log10()  #THIS IS A GREAT CHART LEAVE IT IN
+```
+
+If we look at the scenario we've created here, we're saying that those companies that were acquired at "some price" returned *as a group* 2.5X the money investors put in.  Compared to *as a group* those companies that were acquired at disclosed prices, which returned 7.4X.  Is this fair?  Consider the companies that were acquired-undisclosed are as a group younger than the others.
+
+```{r}
+sum(data3$Inferred.Price)/sum(data3$Total.Funding.Amount)
+sum(data2$Price)/sum(data2$Total.Funding.Amount)
+mean(data3$Inferred.Return)
+mean(data2$Annual.Return)
+```
+
+Then we reassemble our groups to have a look at portfolio & structures.
+
+```{r}
+data2$Total.Return <- NULL
+data3$Price <- data3$Inferred.Price
+data3$Inferred.Price <- NULL
+colnames(data3)[21] <- "Annual.Return"
+colnames(data2) == colnames(data3)
+data5 <- rbind(data2, data3)
+data4$Annual.Return <- 0
+data4$Price <- 0
+data4$Method <- NA
+data4$Price[which(!is.na(data4$Valuation.at.IPO))] <- data4$Valuation.at.IPO[which(!is.na(data4$Valuation.at.IPO))]
+colnames(data4) == colnames(data5)
+data6 <- rbind(data4, data5)
+```
+
+
+
+##Testing Theories on Portfolio size
+
+Now that we have estimates for all of our acquired companies, and we know what the returns would have looked like had we bought the entire cohort of entrants each year (with the $9Tn we've got stashed under the mattress) let's size these portfolios down and see how the returns dispersion of the set reacts.
+
+Monte Carlo Simulation:
+
+
+```{r}
+data7 <- subset(data6, data6$First.Funding <= '2013-01-01')
+runs <- 100
+#simulates a portfolio of 10 companies, returns the probability of getting your money back.
+portfolio.sim <- function(){
+  row.nos <- sample(1:nrow(data7), 5, replace=F)
+  portfolio.denom <- 0
+  portfolio.numer <- 0
+    for (i in row.nos){
+      denom <- data7$Total.Funding.Amount[i]
+      numer <- data7$Price[i]
+      portfolio.denom <- portfolio.denom + denom
+      portfolio.numer <- portfolio.numer + numer}
+  portfolio.return <- portfolio.numer/portfolio.denom
+return(portfolio.return > 1)
+}
+mc.prob <- sum(replicate(runs,portfolio.sim()))/runs
+mc.prob
+```
+
+
+
+
